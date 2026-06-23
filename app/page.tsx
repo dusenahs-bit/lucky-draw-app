@@ -72,43 +72,33 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
     })
 }
 
-let drumRollAudio: HTMLAudioElement | null = null
-let fanfareAudio: HTMLAudioElement | null = null
+let sfxAudio: HTMLAudioElement | null = null
 
 function preloadSounds() {
   if (typeof window === 'undefined') return
-  if (!drumRollAudio) {
-    drumRollAudio = new Audio('/dugudugu.wav')
-    drumRollAudio.preload = 'auto'
-  }
-  if (!fanfareAudio) {
-    fanfareAudio = new Audio('/fanfare.wav')
-    fanfareAudio.preload = 'auto'
+  if (!sfxAudio) {
+    sfxAudio = new Audio('/drumroll-fanfare.mp3')
+    sfxAudio.preload = 'auto'
   }
 }
 
 function playDrumRoll() {
   preloadSounds()
-  if (!drumRollAudio) return
-  drumRollAudio.currentTime = 0
-  drumRollAudio.volume = 0.8
-  drumRollAudio.play().catch(() => {})
+  if (!sfxAudio) return
+  sfxAudio.currentTime = 0
+  sfxAudio.volume = 0.8
+  sfxAudio.play().catch(() => {})
 }
 
 function stopDrumRoll() {
-  if (drumRollAudio) {
-    drumRollAudio.pause()
-    drumRollAudio.currentTime = 0
+  if (sfxAudio) {
+    sfxAudio.pause()
+    sfxAudio.currentTime = 0
   }
 }
 
 function playFanfare() {
-  preloadSounds()
-  stopDrumRoll()
-  if (!fanfareAudio) return
-  fanfareAudio.currentTime = 0
-  fanfareAudio.volume = 0.8
-  fanfareAudio.play().catch(() => {})
+  // audio continues naturally from drumroll to fanfare - no restart needed
 }
 
 function fireConfetti() {
