@@ -368,6 +368,18 @@ export default function Home() {
     })
   }
 
+  const handleSurveyUndoConfirm = async (p: Participant) => {
+    setSurveyConfirmed((prev) => prev.filter((c) => c.key !== p.key))
+    setSurveyPendingConfirmed((prev) => {
+      const next = new Set(prev)
+      next.delete(p.key)
+      return next
+    })
+    await getSupabase().from('winners').delete()
+      .eq('name', p.display)
+      .eq('prize_type', 'survey')
+  }
+
   const handleSurveyRedrawOne = (idx: number) => {
     const excludedKeys = new Set([
       ...surveyConfirmed.map((p) => p.key),
@@ -464,6 +476,21 @@ export default function Home() {
       prize: luckyPrizeTab,
       prize_type: 'lucky',
     })
+  }
+
+  const handleLuckyUndoConfirm = async (p: Participant) => {
+    setLuckyConfirmed((prev) => ({
+      ...prev,
+      [luckyPrizeTab]: prev[luckyPrizeTab].filter((c) => c.key !== p.key),
+    }))
+    setLuckyPendingConfirmed((prev) => {
+      const next = new Set(prev)
+      next.delete(p.key)
+      return next
+    })
+    await getSupabase().from('winners').delete()
+      .eq('name', p.display)
+      .eq('prize_type', 'lucky')
   }
 
   const handleLuckyRedrawOne = (idx: number) => {
@@ -760,7 +787,13 @@ export default function Home() {
                           style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
                           <div className="text-base font-bold">{isRedrawing ? p.drumName : p.display}</div>
                           {isConfirmed ? (
-                            <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                            <div className="flex gap-2 mt-3 items-center">
+                              <span className="text-xs opacity-80">확인 완료</span>
+                              <button onClick={() => handleSurveyUndoConfirm(p)}
+                                className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors">
+                                취소
+                              </button>
+                            </div>
                           ) : isRedrawing ? (
                             <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
                           ) : (
@@ -874,7 +907,13 @@ export default function Home() {
                             style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
                             <div className="text-lg font-bold">{isRedrawing ? p.drumName : p.display}</div>
                             {isConfirmed ? (
-                              <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                              <div className="flex gap-2 mt-3 items-center">
+                                <span className="text-xs opacity-80">확인 완료</span>
+                                <button onClick={() => handleLuckyUndoConfirm(p)}
+                                  className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors">
+                                  취소
+                                </button>
+                              </div>
                             ) : isRedrawing ? (
                               <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
                             ) : (
