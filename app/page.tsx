@@ -72,156 +72,43 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
     })
 }
 
-let audioCtx: AudioContext | null = null
-function getAudioCtx() {
-  if (!audioCtx) audioCtx = new AudioContext()
-  return audioCtx
-}
+let drumRollAudio: HTMLAudioElement | null = null
+let fanfareAudio: HTMLAudioElement | null = null
 
-function createNoise(ctx: AudioContext, duration: number): AudioBufferSourceNode {
-  const bufferSize = ctx.sampleRate * duration
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
-  const data = buffer.getChannelData(0)
-  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
-  const source = ctx.createBufferSource()
-  source.buffer = buffer
-  return source
-}
-
-function playTimpaniHit(ctx: AudioContext, time: number, freq: number, volume: number) {
-  const osc1 = ctx.createOscillator()
-  const osc2 = ctx.createOscillator()
-  const gain = ctx.createGain()
-  const lp = ctx.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.setValueAtTime(400, time)
-  lp.Q.setValueAtTime(2, time)
-
-  osc1.type = 'sine'
-  osc1.frequency.setValueAtTime(freq * 1.5, time)
-  osc1.frequency.exponentialRampToValueAtTime(freq, time + 0.03)
-
-  osc2.type = 'sine'
-  osc2.frequency.setValueAtTime(freq * 2.2, time)
-  osc2.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.05)
-
-  const osc2Gain = ctx.createGain()
-  osc2Gain.gain.setValueAtTime(volume * 0.3, time)
-  osc2Gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06)
-
-  gain.gain.setValueAtTime(volume, time)
-  gain.gain.setValueAtTime(volume * 0.8, time + 0.02)
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.35)
-
-  osc1.connect(lp)
-  lp.connect(gain)
-  osc2.connect(osc2Gain)
-  osc2Gain.connect(gain)
-  gain.connect(ctx.destination)
-
-  osc1.start(time)
-  osc1.stop(time + 0.4)
-  osc2.start(time)
-  osc2.stop(time + 0.1)
-
-  const noise = createNoise(ctx, 0.05)
-  const nGain = ctx.createGain()
-  const nFilter = ctx.createBiquadFilter()
-  nFilter.type = 'bandpass'
-  nFilter.frequency.setValueAtTime(200, time)
-  nFilter.Q.setValueAtTime(1, time)
-  nGain.gain.setValueAtTime(volume * 0.15, time)
-  nGain.gain.exponentialRampToValueAtTime(0.001, time + 0.04)
-  noise.connect(nFilter)
-  nFilter.connect(nGain)
-  nGain.connect(ctx.destination)
-  noise.start(time)
-  noise.stop(time + 0.05)
-}
-
-function playDrumRoll(duration = 3) {
-  const ctx = getAudioCtx()
-  const now = ctx.currentTime
-
-  const freqL = 90
-  const freqR = 110
-  const timestamps: number[] = []
-  let t = 0
-  const startInterval = 0.28
-  const endInterval = 0.06
-  while (t < duration) {
-    timestamps.push(t)
-    const progress = t / duration
-    const interval = startInterval + (endInterval - startInterval) * progress * progress
-    t += interval
+function preloadSounds() {
+  if (typeof window === 'undefined') return
+  if (!drumRollAudio) {
+    drumRollAudio = new Audio('/dugudugu.wav')
+    drumRollAudio.preload = 'auto'
   }
-
-  timestamps.forEach((time, i) => {
-    const progress = time / duration
-    const vol = 0.12 + progress * 0.25
-    const freq = i % 2 === 0 ? freqL : freqR
-    playTimpaniHit(ctx, now + time, freq, vol)
-  })
+  if (!fanfareAudio) {
+    fanfareAudio = new Audio('/fanfare.wav')
+    fanfareAudio.preload = 'auto'
+  }
 }
 
-function playBrass(ctx: AudioContext, freq: number, time: number, dur: number, vol: number) {
-  const harmonics = [1, 2, 3, 4, 5]
-  const amps = [1, 0.5, 0.3, 0.15, 0.08]
-  const master = ctx.createGain()
-  master.gain.setValueAtTime(0.001, time)
-  master.gain.linearRampToValueAtTime(vol, time + 0.04)
-  master.gain.setValueAtTime(vol * 0.8, time + dur * 0.3)
-  master.gain.linearRampToValueAtTime(vol * 0.7, time + dur * 0.8)
-  master.gain.exponentialRampToValueAtTime(0.001, time + dur)
-  master.connect(ctx.destination)
-
-  harmonics.forEach((h, idx) => {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(freq * h, time)
-    gain.gain.setValueAtTime(amps[idx], time)
-    osc.connect(gain)
-    gain.connect(master)
-    osc.start(time)
-    osc.stop(time + dur + 0.05)
-  })
+function playDrumRoll() {
+  preloadSounds()
+  if (!drumRollAudio) return
+  drumRollAudio.currentTime = 0
+  drumRollAudio.volume = 0.8
+  drumRollAudio.play().catch(() => {})
 }
 
-function playCymbalCrash(ctx: AudioContext, time: number) {
-  const noise = createNoise(ctx, 1.5)
-  const hp = ctx.createBiquadFilter()
-  hp.type = 'highpass'
-  hp.frequency.setValueAtTime(6000, time)
-  const lp = ctx.createBiquadFilter()
-  lp.type = 'lowpass'
-  lp.frequency.setValueAtTime(14000, time)
-  const gain = ctx.createGain()
-  gain.gain.setValueAtTime(0.12, time)
-  gain.gain.exponentialRampToValueAtTime(0.001, time + 1.2)
-  noise.connect(hp)
-  hp.connect(lp)
-  lp.connect(gain)
-  gain.connect(ctx.destination)
-  noise.start(time)
-  noise.stop(time + 1.5)
+function stopDrumRoll() {
+  if (drumRollAudio) {
+    drumRollAudio.pause()
+    drumRollAudio.currentTime = 0
+  }
 }
 
 function playFanfare() {
-  const ctx = getAudioCtx()
-  const now = ctx.currentTime
-  const v = 0.08
-
-  playBrass(ctx, 349.23, now, 0.2, v)
-  playBrass(ctx, 261.63, now, 0.2, v * 0.6)
-  playBrass(ctx, 440.00, now + 0.18, 0.2, v)
-  playBrass(ctx, 349.23, now + 0.18, 0.2, v * 0.6)
-  playBrass(ctx, 523.25, now + 0.36, 0.2, v * 1.1)
-  playBrass(ctx, 440.00, now + 0.36, 0.2, v * 0.6)
-  playBrass(ctx, 698.46, now + 0.54, 0.6, v * 1.2)
-  playBrass(ctx, 523.25, now + 0.54, 0.6, v * 0.8)
-  playBrass(ctx, 349.23, now + 0.54, 0.6, v * 0.5)
-  playCymbalCrash(ctx, now + 0.54)
+  preloadSounds()
+  stopDrumRoll()
+  if (!fanfareAudio) return
+  fanfareAudio.currentTime = 0
+  fanfareAudio.volume = 0.8
+  fanfareAudio.play().catch(() => {})
 }
 
 function fireConfetti() {
@@ -365,7 +252,7 @@ export default function Home() {
     setDrawing(true)
     setPending([])
     setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-    playDrumRoll(3)
+    playDrumRoll()
     let tick = 0
     const totalTicks = 30
     const run = () => {
@@ -376,6 +263,7 @@ export default function Home() {
         setPending(shuffle(pool).slice(0, drawCount))
         setDrumNameFn('')
         setDrawing(false)
+        stopDrumRoll()
         setTimeout(() => { fireConfetti(); playFanfare() }, 100)
       }
     }
@@ -420,7 +308,7 @@ export default function Home() {
     if (pool.length === 0) return
     setRedrawingIdx(idx)
     setRedrawingType('survey')
-    playDrumRoll(1.2)
+    playDrumRoll()
     let tick = 0
     const total = 15
     const timer = setInterval(() => {
@@ -432,6 +320,7 @@ export default function Home() {
         clearInterval(timer)
         const winner = shuffle(pool)[0]
         setSurveyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+        stopDrumRoll()
         setRedrawingIdx(null)
         setRedrawingType(null)
       }
@@ -449,7 +338,7 @@ export default function Home() {
     const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
     setRedrawingIdx(-1)
     setRedrawingType('survey')
-    playDrumRoll(1.6)
+    playDrumRoll()
     let tick = 0
     const total = 20
     const timer = setInterval(() => {
@@ -533,7 +422,7 @@ export default function Home() {
     if (pool.length === 0) return
     setRedrawingIdx(idx)
     setRedrawingType('lucky')
-    playDrumRoll(1.2)
+    playDrumRoll()
     let tick = 0
     const total = 15
     const timer = setInterval(() => {
@@ -545,6 +434,7 @@ export default function Home() {
         clearInterval(timer)
         const winner = shuffle(pool)[0]
         setLuckyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+        stopDrumRoll()
         setRedrawingIdx(null)
         setRedrawingType(null)
       }
@@ -562,7 +452,7 @@ export default function Home() {
     )
     setRedrawingIdx(-1)
     setRedrawingType('lucky')
-    playDrumRoll(1.6)
+    playDrumRoll()
     let tick = 0
     const total = 20
     const timer = setInterval(() => {
@@ -633,6 +523,10 @@ export default function Home() {
       .order('confirmed_at', { ascending: true })
     if (data) setAllWinners(data)
   }
+
+  useEffect(() => {
+    if (mode === 'draw') preloadSounds()
+  }, [mode])
 
   useEffect(() => {
     if (drawPage === 'results') loadResults()
