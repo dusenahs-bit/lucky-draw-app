@@ -643,7 +643,7 @@ export default function Home() {
         </button>
       </header>
 
-      <main className="max-w-3xl mx-auto p-4 md:p-6">
+      <main className="max-w-5xl mx-auto p-4 md:p-6">
         {/* HOME: Draw selection */}
         {drawPage === 'home' && (
           <div className="space-y-4 mt-8">
