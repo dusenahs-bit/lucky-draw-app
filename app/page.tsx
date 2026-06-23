@@ -88,49 +88,80 @@ function createNoise(ctx: AudioContext, duration: number): AudioBufferSourceNode
   return source
 }
 
-function playSnareHit(ctx: AudioContext, time: number, volume: number) {
-  const noise = createNoise(ctx, 0.1)
-  const noiseFilter = ctx.createBiquadFilter()
-  noiseFilter.type = 'highpass'
-  noiseFilter.frequency.setValueAtTime(3000, time)
-  const noiseGain = ctx.createGain()
-  noiseGain.gain.setValueAtTime(volume * 0.6, time)
-  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08)
-  noise.connect(noiseFilter)
-  noiseFilter.connect(noiseGain)
-  noiseGain.connect(ctx.destination)
-  noise.start(time)
-  noise.stop(time + 0.1)
+function playTimpaniHit(ctx: AudioContext, time: number, freq: number, volume: number) {
+  const osc1 = ctx.createOscillator()
+  const osc2 = ctx.createOscillator()
+  const gain = ctx.createGain()
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(400, time)
+  lp.Q.setValueAtTime(2, time)
 
-  const body = ctx.createOscillator()
-  const bodyGain = ctx.createGain()
-  body.type = 'triangle'
-  body.frequency.setValueAtTime(180, time)
-  body.frequency.exponentialRampToValueAtTime(80, time + 0.04)
-  bodyGain.gain.setValueAtTime(volume * 0.4, time)
-  bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.06)
-  body.connect(bodyGain)
-  bodyGain.connect(ctx.destination)
-  body.start(time)
-  body.stop(time + 0.08)
+  osc1.type = 'sine'
+  osc1.frequency.setValueAtTime(freq * 1.5, time)
+  osc1.frequency.exponentialRampToValueAtTime(freq, time + 0.03)
+
+  osc2.type = 'sine'
+  osc2.frequency.setValueAtTime(freq * 2.2, time)
+  osc2.frequency.exponentialRampToValueAtTime(freq * 0.5, time + 0.05)
+
+  const osc2Gain = ctx.createGain()
+  osc2Gain.gain.setValueAtTime(volume * 0.3, time)
+  osc2Gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06)
+
+  gain.gain.setValueAtTime(volume, time)
+  gain.gain.setValueAtTime(volume * 0.8, time + 0.02)
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.35)
+
+  osc1.connect(lp)
+  lp.connect(gain)
+  osc2.connect(osc2Gain)
+  osc2Gain.connect(gain)
+  gain.connect(ctx.destination)
+
+  osc1.start(time)
+  osc1.stop(time + 0.4)
+  osc2.start(time)
+  osc2.stop(time + 0.1)
+
+  const noise = createNoise(ctx, 0.05)
+  const nGain = ctx.createGain()
+  const nFilter = ctx.createBiquadFilter()
+  nFilter.type = 'bandpass'
+  nFilter.frequency.setValueAtTime(200, time)
+  nFilter.Q.setValueAtTime(1, time)
+  nGain.gain.setValueAtTime(volume * 0.15, time)
+  nGain.gain.exponentialRampToValueAtTime(0.001, time + 0.04)
+  noise.connect(nFilter)
+  nFilter.connect(nGain)
+  nGain.connect(ctx.destination)
+  noise.start(time)
+  noise.stop(time + 0.05)
 }
 
 function playDrumRoll(duration = 3) {
   const ctx = getAudioCtx()
   const now = ctx.currentTime
-  const totalHits = Math.floor(duration * 16)
 
-  for (let i = 0; i < totalHits; i++) {
-    const progress = i / totalHits
-    const interval = 0.08 - progress * 0.04
-    let t = now
-    for (let j = 0; j < i; j++) {
-      t += 0.08 - (j / totalHits) * 0.04
-    }
-    if (t - now > duration) break
-    const vol = 0.06 + progress * 0.14
-    playSnareHit(ctx, t, vol)
+  const freqL = 90
+  const freqR = 110
+  const timestamps: number[] = []
+  let t = 0
+  const startInterval = 0.28
+  const endInterval = 0.06
+  while (t < duration) {
+    timestamps.push(t)
+    const progress = t / duration
+    const interval = startInterval + (endInterval - startInterval) * progress * progress
+    t += interval
   }
+
+  timestamps.forEach((time, i) => {
+    const progress = time / duration
+    const vol = 0.12 + progress * 0.25
+    const freq = i % 2 === 0 ? freqL : freqR
+    playTimpaniHit(ctx, now + time, freq, vol)
+  })
 }
 
 function playBrass(ctx: AudioContext, freq: number, time: number, dur: number, vol: number) {
