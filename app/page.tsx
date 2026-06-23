@@ -399,8 +399,8 @@ export default function Home() {
       <header className="bg-primary text-white py-5 px-4 shadow-lg relative">
         <h1 className="text-center text-2xl md:text-3xl font-bold">경품추첨</h1>
         <button onClick={() => setMode('setup')}
-          className="absolute top-5 right-4 text-white/30 hover:text-white/80 text-xs transition-colors" title="관리자 설정">
-          설정
+          className="absolute top-5 right-4 bg-white/20 hover:bg-white/40 text-white text-sm px-3 py-1 rounded-lg transition-colors" title="관리자 설정">
+          관리자
         </button>
       </header>
 
