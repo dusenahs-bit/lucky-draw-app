@@ -7,18 +7,17 @@ import { getSupabase, type Winner } from '../lib/supabase'
 type Tab = 'survey' | 'lucky' | 'results'
 type LuckyPrize = '논픽션 핸드크림' | '하이드로 텀블러' | 'TWG Tea'
 
+interface Participant {
+  key: string
+  drumName: string
+  display: string
+}
+
 const LUCKY_PRIZES: { name: LuckyPrize; count: number }[] = [
   { name: '논픽션 핸드크림', count: 5 },
   { name: '하이드로 텀블러', count: 3 },
   { name: 'TWG Tea', count: 3 },
 ]
-
-function parseNames(text: string): string[] {
-  return text
-    .split(/[\n,]+/)
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0)
-}
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -29,25 +28,70 @@ function shuffle<T>(arr: T[]): T[] {
   return a
 }
 
+function last4(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  return digits.slice(-4)
+}
+
+function parseSurveyExcel(data: Uint8Array): Participant[] {
+  const workbook = XLSX.read(data, { type: 'array' })
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+  const dataRows = rows.slice(1)
+  return dataRows
+    .filter((row) => row[2] && String(row[2]).trim())
+    .map((row) => {
+      const type = String(row[0] ?? '').trim()
+      const region = String(row[1] ?? '').trim()
+      const idInfo = String(row[2] ?? '').trim()
+      return {
+        key: idInfo,
+        drumName: idInfo,
+        display: `${type} | ${region} | ${idInfo}`,
+      }
+    })
+}
+
+function parseLuckyExcel(data: Uint8Array): Participant[] {
+  const workbook = XLSX.read(data, { type: 'array' })
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+  const dataRows = rows.slice(1)
+  return dataRows
+    .filter((row) => row[1] && String(row[1]).trim())
+    .map((row) => {
+      const name = String(row[1] ?? '').trim()
+      const phone = String(row[2] ?? '').trim()
+      const phoneLast4 = last4(phone)
+      return {
+        key: `${name}_${phoneLast4}`,
+        drumName: name,
+        display: phoneLast4 ? `${name} (${phoneLast4})` : name,
+      }
+    })
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>('survey')
 
   // Survey state
-  const [surveyInput, setSurveyInput] = useState('')
+  const [surveyParticipants, setSurveyParticipants] = useState<Participant[]>([])
+  const [surveyFileName, setSurveyFileName] = useState('')
   const [surveyCount, setSurveyCount] = useState(10)
   const [surveyDrawing, setSurveyDrawing] = useState(false)
   const [surveyDrumName, setSurveyDrumName] = useState('')
-  const [surveyPending, setSurveyPending] = useState<string[]>([])
-  const [surveyConfirmed, setSurveyConfirmed] = useState<string[]>([])
+  const [surveyPending, setSurveyPending] = useState<Participant[]>([])
+  const [surveyConfirmed, setSurveyConfirmed] = useState<Participant[]>([])
   const surveyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Lucky draw state
-  const [luckyInput, setLuckyInput] = useState('')
+  const [luckyParticipants, setLuckyParticipants] = useState<Participant[]>([])
+  const [luckyFileName, setLuckyFileName] = useState('')
   const [luckyPrizeTab, setLuckyPrizeTab] = useState<LuckyPrize>('논픽션 핸드크림')
   const [luckyDrawing, setLuckyDrawing] = useState(false)
   const [luckyDrumName, setLuckyDrumName] = useState('')
-  const [luckyPending, setLuckyPending] = useState<string[]>([])
-  const [luckyConfirmed, setLuckyConfirmed] = useState<Record<LuckyPrize, string[]>>({
+  const [luckyPending, setLuckyPending] = useState<Participant[]>([])
+  const [luckyConfirmed, setLuckyConfirmed] = useState<Record<LuckyPrize, Participant[]>>({
     '논픽션 핸드크림': [],
     '하이드로 텀블러': [],
     'TWG Tea': [],
@@ -58,52 +102,49 @@ export default function Home() {
   const [allWinners, setAllWinners] = useState<Winner[]>([])
   const [copied, setCopied] = useState(false)
 
-  const getAllLuckyConfirmed = useCallback(() => {
-    return Object.values(luckyConfirmed).flat()
+  const getAllLuckyConfirmedKeys = useCallback(() => {
+    return new Set(Object.values(luckyConfirmed).flat().map((p) => p.key))
   }, [luckyConfirmed])
 
   const getSurveyPool = useCallback(() => {
-    const names = parseNames(surveyInput)
-    const excluded = new Set(surveyConfirmed)
-    return names.filter((n) => !excluded.has(n))
-  }, [surveyInput, surveyConfirmed])
+    const excludedKeys = new Set(surveyConfirmed.map((p) => p.key))
+    return surveyParticipants.filter((p) => !excludedKeys.has(p.key))
+  }, [surveyParticipants, surveyConfirmed])
 
   const getLuckyPool = useCallback(() => {
-    const names = parseNames(luckyInput)
-    const excluded = new Set(getAllLuckyConfirmed())
-    return names.filter((n) => !excluded.has(n))
-  }, [luckyInput, getAllLuckyConfirmed])
+    const excludedKeys = getAllLuckyConfirmedKeys()
+    return luckyParticipants.filter((p) => !excludedKeys.has(p.key))
+  }, [luckyParticipants, getAllLuckyConfirmedKeys])
 
   const currentPrizeConfig = LUCKY_PRIZES.find((p) => p.name === luckyPrizeTab)!
   const currentPrizeRemaining = currentPrizeConfig.count - luckyConfirmed[luckyPrizeTab].length
 
   const startDrumRoll = (
-    pool: string[],
+    pool: Participant[],
     count: number,
-    setDrumName: (n: string) => void,
+    setDrumNameFn: (n: string) => void,
     setDrawing: (b: boolean) => void,
-    setPending: (names: string[]) => void,
+    setPending: (p: Participant[]) => void,
     timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>
   ) => {
     if (pool.length === 0) return
     const drawCount = Math.min(count, pool.length)
     setDrawing(true)
     setPending([])
-    setDrumName(pool[Math.floor(Math.random() * pool.length)])
+    setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
 
     let tick = 0
     const totalTicks = 30
 
     const run = () => {
       tick++
-      const randomIdx = Math.floor(Math.random() * pool.length)
-      setDrumName(pool[randomIdx])
+      setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
 
       if (tick >= totalTicks) {
         if (timerRef.current) clearInterval(timerRef.current)
         const winners = shuffle(pool).slice(0, drawCount)
         setPending(winners)
-        setDrumName('')
+        setDrumNameFn('')
         setDrawing(false)
       }
     }
@@ -111,6 +152,7 @@ export default function Home() {
     timerRef.current = setInterval(run, 100)
   }
 
+  // Survey handlers
   const handleSurveyDraw = () => {
     const pool = getSurveyPool()
     setSurveyPending([])
@@ -118,11 +160,10 @@ export default function Home() {
   }
 
   const handleSurveyConfirm = async () => {
-    const newConfirmed = [...surveyConfirmed, ...surveyPending]
-    setSurveyConfirmed(newConfirmed)
+    setSurveyConfirmed((prev) => [...prev, ...surveyPending])
 
-    const rows = surveyPending.map((name) => ({
-      name,
+    const rows = surveyPending.map((p) => ({
+      name: p.display,
       prize: '배달의민족 상품권 5만원권',
       prize_type: 'survey' as const,
     }))
@@ -132,19 +173,24 @@ export default function Home() {
   }
 
   const handleSurveyRedraw = () => {
-    const pool = getSurveyPool().filter((n) => !surveyPending.includes(n))
+    const pendingKeys = new Set(surveyPending.map((p) => p.key))
+    const pool = getSurveyPool().filter((p) => !pendingKeys.has(p.key))
     setSurveyPending([])
     startDrumRoll(pool, surveyCount, setSurveyDrumName, setSurveyDrawing, setSurveyPending, surveyTimerRef)
   }
 
   const handleSurveyRedrawOne = (idx: number) => {
-    const excluded = new Set([...surveyConfirmed, ...surveyPending])
-    const pool = parseNames(surveyInput).filter((n) => !excluded.has(n))
+    const excludedKeys = new Set([
+      ...surveyConfirmed.map((p) => p.key),
+      ...surveyPending.map((p) => p.key),
+    ])
+    const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
     if (pool.length === 0) return
     const replacement = shuffle(pool)[0]
-    setSurveyPending((prev) => prev.map((n, i) => (i === idx ? replacement : n)))
+    setSurveyPending((prev) => prev.map((p, i) => (i === idx ? replacement : p)))
   }
 
+  // Lucky draw handlers
   const handleLuckyDraw = () => {
     const pool = getLuckyPool()
     setLuckyPending([])
@@ -157,8 +203,8 @@ export default function Home() {
       [luckyPrizeTab]: [...prev[luckyPrizeTab], ...luckyPending],
     }))
 
-    const rows = luckyPending.map((name) => ({
-      name,
+    const rows = luckyPending.map((p) => ({
+      name: p.display,
       prize: luckyPrizeTab,
       prize_type: 'lucky' as const,
     }))
@@ -168,14 +214,42 @@ export default function Home() {
   }
 
   const handleLuckyRedrawOne = (idx: number) => {
-    const allConfirmed = getAllLuckyConfirmed()
-    const excluded = new Set([...allConfirmed, ...luckyPending])
-    const pool = parseNames(luckyInput).filter((n) => !excluded.has(n))
+    const allConfirmedKeys = getAllLuckyConfirmedKeys()
+    const pendingKeys = new Set(luckyPending.map((p) => p.key))
+    const pool = luckyParticipants.filter(
+      (p) => !allConfirmedKeys.has(p.key) && !pendingKeys.has(p.key)
+    )
     if (pool.length === 0) return
     const replacement = shuffle(pool)[0]
-    setLuckyPending((prev) => prev.map((n, i) => (i === idx ? replacement : n)))
+    setLuckyPending((prev) => prev.map((p, i) => (i === idx ? replacement : p)))
   }
 
+  // File upload handlers
+  const handleSurveyFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setSurveyFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const data = new Uint8Array(ev.target?.result as ArrayBuffer)
+      setSurveyParticipants(parseSurveyExcel(data))
+    }
+    reader.readAsArrayBuffer(file)
+  }
+
+  const handleLuckyFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setLuckyFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const data = new Uint8Array(ev.target?.result as ArrayBuffer)
+      setLuckyParticipants(parseLuckyExcel(data))
+    }
+    reader.readAsArrayBuffer(file)
+  }
+
+  // Results
   const loadResults = async () => {
     const { data } = await getSupabase()
       .from('winners')
@@ -188,45 +262,13 @@ export default function Home() {
     if (activeTab === 'results') loadResults()
   }, [activeTab])
 
-  const handleFileUpload = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    setInput: (v: string) => void
-  ) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const ext = file.name.split('.').pop()?.toLowerCase()
-
-    if (ext === 'xlsx' || ext === 'xls') {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        const data = new Uint8Array(ev.target?.result as ArrayBuffer)
-        const workbook = XLSX.read(data, { type: 'array' })
-        const sheet = workbook.Sheets[workbook.SheetNames[0]]
-        const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-        const names = rows
-          .flat()
-          .map((cell) => String(cell ?? '').trim())
-          .filter((n) => n.length > 0)
-        setInput(names.join('\n'))
-      }
-      reader.readAsArrayBuffer(file)
-    } else {
-      const reader = new FileReader()
-      reader.onload = (ev) => {
-        const text = ev.target?.result as string
-        setInput(text)
-      }
-      reader.readAsText(file)
-    }
-  }
-
   const copyResults = () => {
     const surveyWinners = allWinners.filter((w) => w.prize_type === 'survey')
     const luckyWinners = allWinners.filter((w) => w.prize_type === 'lucky')
 
     let text = '=== 설문조사 경품추첨 당첨자 ===\n'
     surveyWinners.forEach((w, i) => {
-      text += `${i + 1}. ${w.name} - ${w.prize}\n`
+      text += `${i + 1}. ${w.name}\n`
     })
     text += '\n=== 럭키드로우 당첨자 ===\n'
     const grouped: Record<string, string[]> = {}
@@ -254,7 +296,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#e8f4fd] to-white">
-      {/* Header */}
       <header className="bg-primary text-white py-4 px-4 shadow-lg">
         <h1 className="text-center text-xl md:text-2xl font-bold">
           2026년 국가·지역진로교육센터 및 진로체험지원센터 워크숍
@@ -262,7 +303,6 @@ export default function Home() {
         <p className="text-center text-sm md:text-base mt-1 opacity-90">경품추첨 이벤트</p>
       </header>
 
-      {/* Tab navigation */}
       <nav className="flex border-b border-gray-200 bg-white sticky top-0 z-10">
         {tabs.map((tab) => (
           <button
@@ -284,27 +324,40 @@ export default function Home() {
         {activeTab === 'survey' && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 입력</h2>
-              <textarea
-                className="w-full h-40 border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                placeholder="이름을 줄바꿈 또는 쉼표로 구분하여 입력하세요..."
-                value={surveyInput}
-                onChange={(e) => setSurveyInput(e.target.value)}
-              />
-              <div className="mt-3 flex items-center gap-3">
-                <label className="text-sm text-gray-600 cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
-                  파일 업로드 (xlsx/csv/txt)
+              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 업로드</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                엑셀 형식: A열(센터유형), B열(지역), C열(아이디+연락처 뒷번호)
+              </p>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-white cursor-pointer bg-primary hover:bg-primary-dark px-4 py-2 rounded-lg transition-colors font-medium">
+                  엑셀 파일 업로드
                   <input
                     type="file"
-                    accept=".txt,.csv,.xlsx,.xls"
+                    accept=".xlsx,.xls"
                     className="hidden"
-                    onChange={(e) => handleFileUpload(e, setSurveyInput)}
+                    onChange={handleSurveyFileUpload}
                   />
                 </label>
-                <span className="text-sm text-gray-500">
-                  참가자 {getSurveyPool().length}명 (전체 {parseNames(surveyInput).length}명)
-                </span>
+                {surveyFileName && (
+                  <span className="text-sm text-gray-600">{surveyFileName}</span>
+                )}
               </div>
+              {surveyParticipants.length > 0 && (
+                <div className="mt-4 p-3 bg-primary-light rounded-lg">
+                  <span className="text-sm font-medium text-primary">
+                    참가자 {getSurveyPool().length}명 로드 완료
+                    {surveyConfirmed.length > 0 && ` (확정 ${surveyConfirmed.length}명 제외)`}
+                  </span>
+                  <div className="mt-2 max-h-32 overflow-y-auto text-xs text-gray-600 space-y-1">
+                    {surveyParticipants.slice(0, 5).map((p, i) => (
+                      <div key={i}>{p.display}</div>
+                    ))}
+                    {surveyParticipants.length > 5 && (
+                      <div className="text-gray-400">... 외 {surveyParticipants.length - 5}명</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -326,7 +379,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Drum roll area */}
             <div className="bg-white rounded-xl shadow-md p-6 text-center">
               {surveyDrawing && (
                 <div className="mb-4">
@@ -350,17 +402,17 @@ export default function Home() {
               {!surveyDrawing && surveyPending.length > 0 && (
                 <div>
                   <h3 className="text-lg font-bold text-gray-700 mb-4">당첨자 발표!</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                    {surveyPending.map((name, i) => (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                    {surveyPending.map((p, i) => (
                       <div
                         key={i}
-                        className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-lg p-3 shadow-md"
+                        className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-lg p-4 shadow-md text-left"
                         style={{ animationDelay: `${i * 0.1}s` }}
                       >
-                        <div className="text-lg font-bold">{name}</div>
+                        <div className="text-base font-bold">{p.display}</div>
                         <button
                           onClick={() => handleSurveyRedrawOne(i)}
-                          className="text-xs mt-1 opacity-75 hover:opacity-100 underline"
+                          className="text-xs mt-2 opacity-75 hover:opacity-100 underline"
                         >
                           재추첨
                         </button>
@@ -385,19 +437,18 @@ export default function Home() {
               )}
             </div>
 
-            {/* Confirmed winners */}
             {surveyConfirmed.length > 0 && (
               <div className="bg-white rounded-xl shadow-md p-6">
                 <h2 className="text-lg font-bold text-primary mb-4">
                   확정 당첨자 ({surveyConfirmed.length}명)
                 </h2>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {surveyConfirmed.map((name, i) => (
+                <div className="space-y-2">
+                  {surveyConfirmed.map((p, i) => (
                     <div
                       key={i}
-                      className="bg-primary-light text-primary rounded-lg p-2 text-center text-sm font-medium"
+                      className="bg-primary-light text-primary rounded-lg p-3 text-sm font-medium"
                     >
-                      {i + 1}. {name}
+                      {i + 1}. {p.display}
                     </div>
                   ))}
                 </div>
@@ -410,30 +461,43 @@ export default function Home() {
         {activeTab === 'lucky' && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 입력</h2>
-              <textarea
-                className="w-full h-40 border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                placeholder="이름을 줄바꿈 또는 쉼표로 구분하여 입력하세요..."
-                value={luckyInput}
-                onChange={(e) => setLuckyInput(e.target.value)}
-              />
-              <div className="mt-3 flex items-center gap-3">
-                <label className="text-sm text-gray-600 cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
-                  파일 업로드 (xlsx/csv/txt)
+              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 업로드</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                엑셀 형식: B열(이름), C열(연락처) — 당첨 시 이름 + 연락처 뒷 4자리 표시
+              </p>
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-white cursor-pointer bg-primary hover:bg-primary-dark px-4 py-2 rounded-lg transition-colors font-medium">
+                  엑셀 파일 업로드
                   <input
                     type="file"
-                    accept=".txt,.csv,.xlsx,.xls"
+                    accept=".xlsx,.xls"
                     className="hidden"
-                    onChange={(e) => handleFileUpload(e, setLuckyInput)}
+                    onChange={handleLuckyFileUpload}
                   />
                 </label>
-                <span className="text-sm text-gray-500">
-                  참가자 {getLuckyPool().length}명 (전체 {parseNames(luckyInput).length}명)
-                </span>
+                {luckyFileName && (
+                  <span className="text-sm text-gray-600">{luckyFileName}</span>
+                )}
               </div>
+              {luckyParticipants.length > 0 && (
+                <div className="mt-4 p-3 bg-primary-light rounded-lg">
+                  <span className="text-sm font-medium text-primary">
+                    참가자 {getLuckyPool().length}명 로드 완료
+                    {Object.values(luckyConfirmed).flat().length > 0 &&
+                      ` (확정 ${Object.values(luckyConfirmed).flat().length}명 제외)`}
+                  </span>
+                  <div className="mt-2 max-h-32 overflow-y-auto text-xs text-gray-600 space-y-1">
+                    {luckyParticipants.slice(0, 5).map((p, i) => (
+                      <div key={i}>{p.display}</div>
+                    ))}
+                    {luckyParticipants.length > 5 && (
+                      <div className="text-gray-400">... 외 {luckyParticipants.length - 5}명</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Prize tabs */}
             <div className="bg-white rounded-xl shadow-md overflow-hidden">
               <div className="flex border-b">
                 {LUCKY_PRIZES.map((prize) => (
@@ -489,13 +553,13 @@ export default function Home() {
                       {luckyPrizeTab} 당첨자!
                     </h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                      {luckyPending.map((name, i) => (
+                      {luckyPending.map((p, i) => (
                         <div
                           key={i}
                           className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-lg p-3 shadow-md"
                           style={{ animationDelay: `${i * 0.1}s` }}
                         >
-                          <div className="text-lg font-bold">{name}</div>
+                          <div className="text-lg font-bold">{p.display}</div>
                           <button
                             onClick={() => handleLuckyRedrawOne(i)}
                             className="text-xs mt-1 opacity-75 hover:opacity-100 underline"
@@ -524,8 +588,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Lucky confirmed list */}
-            {getAllLuckyConfirmed().length > 0 && (
+            {Object.values(luckyConfirmed).flat().length > 0 && (
               <div className="bg-white rounded-xl shadow-md p-6">
                 <h2 className="text-lg font-bold text-primary mb-4">럭키드로우 당첨자</h2>
                 {LUCKY_PRIZES.map(
@@ -535,13 +598,13 @@ export default function Home() {
                         <h3 className="text-sm font-bold text-gray-600 mb-2">
                           {prize.name} ({luckyConfirmed[prize.name].length}/{prize.count}명)
                         </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                          {luckyConfirmed[prize.name].map((name, i) => (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {luckyConfirmed[prize.name].map((p, i) => (
                             <div
                               key={i}
                               className="bg-primary-light text-primary rounded-lg p-2 text-center text-sm font-medium"
                             >
-                              {i + 1}. {name}
+                              {i + 1}. {p.display}
                             </div>
                           ))}
                         </div>
@@ -579,7 +642,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Survey winners */}
               <div className="mb-6">
                 <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">
                   설문조사 경품추첨
@@ -587,7 +649,7 @@ export default function Home() {
                 {allWinners.filter((w) => w.prize_type === 'survey').length === 0 ? (
                   <p className="text-gray-400 text-sm">아직 당첨자가 없습니다.</p>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <div className="space-y-2">
                     {allWinners
                       .filter((w) => w.prize_type === 'survey')
                       .map((w, i) => (
@@ -598,14 +660,12 @@ export default function Home() {
                           <div className="font-bold">
                             {i + 1}. {w.name}
                           </div>
-                          <div className="text-xs opacity-75">{w.prize}</div>
                         </div>
                       ))}
                   </div>
                 )}
               </div>
 
-              {/* Lucky draw winners */}
               <div>
                 <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">
                   럭키드로우
