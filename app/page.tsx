@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 import { getSupabase, type Winner } from '../lib/supabase'
 
 type Tab = 'survey' | 'lucky' | 'results'
@@ -193,12 +194,30 @@ export default function Home() {
   ) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string
-      setInput(text)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+
+    if (ext === 'xlsx' || ext === 'xls') {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const data = new Uint8Array(ev.target?.result as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: 'array' })
+        const sheet = workbook.Sheets[workbook.SheetNames[0]]
+        const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+        const names = rows
+          .flat()
+          .map((cell) => String(cell ?? '').trim())
+          .filter((n) => n.length > 0)
+        setInput(names.join('\n'))
+      }
+      reader.readAsArrayBuffer(file)
+    } else {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const text = ev.target?.result as string
+        setInput(text)
+      }
+      reader.readAsText(file)
     }
-    reader.readAsText(file)
   }
 
   const copyResults = () => {
@@ -274,10 +293,10 @@ export default function Home() {
               />
               <div className="mt-3 flex items-center gap-3">
                 <label className="text-sm text-gray-600 cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
-                  파일 업로드 (txt/csv)
+                  파일 업로드 (xlsx/csv/txt)
                   <input
                     type="file"
-                    accept=".txt,.csv"
+                    accept=".txt,.csv,.xlsx,.xls"
                     className="hidden"
                     onChange={(e) => handleFileUpload(e, setSurveyInput)}
                   />
@@ -400,10 +419,10 @@ export default function Home() {
               />
               <div className="mt-3 flex items-center gap-3">
                 <label className="text-sm text-gray-600 cursor-pointer bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
-                  파일 업로드 (txt/csv)
+                  파일 업로드 (xlsx/csv/txt)
                   <input
                     type="file"
-                    accept=".txt,.csv"
+                    accept=".txt,.csv,.xlsx,.xls"
                     className="hidden"
                     onChange={(e) => handleFileUpload(e, setLuckyInput)}
                   />
