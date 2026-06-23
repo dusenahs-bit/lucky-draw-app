@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import { getSupabase, type Winner } from '../lib/supabase'
 
 type Tab = 'survey' | 'lucky' | 'results'
+type Mode = 'setup' | 'draw'
 type LuckyPrize = '논픽션 핸드크림' | '하이드로 텀블러' | 'TWG Tea'
 
 interface Participant {
@@ -37,8 +38,8 @@ function parseSurveyExcel(data: Uint8Array): Participant[] {
   const workbook = XLSX.read(data, { type: 'array' })
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
   const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-  const dataRows = rows.slice(1)
-  return dataRows
+  return rows
+    .slice(1)
     .filter((row) => row[2] && String(row[2]).trim())
     .map((row) => {
       const type = String(row[0] ?? '').trim()
@@ -56,8 +57,8 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
   const workbook = XLSX.read(data, { type: 'array' })
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
   const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-  const dataRows = rows.slice(1)
-  return dataRows
+  return rows
+    .slice(1)
     .filter((row) => row[1] && String(row[1]).trim())
     .map((row) => {
       const name = String(row[1] ?? '').trim()
@@ -72,6 +73,7 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
 }
 
 export default function Home() {
+  const [mode, setMode] = useState<Mode>('setup')
   const [activeTab, setActiveTab] = useState<Tab>('survey')
 
   // Survey state
@@ -139,7 +141,6 @@ export default function Home() {
     const run = () => {
       tick++
       setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-
       if (tick >= totalTicks) {
         if (timerRef.current) clearInterval(timerRef.current)
         const winners = shuffle(pool).slice(0, drawCount)
@@ -161,13 +162,11 @@ export default function Home() {
 
   const handleSurveyConfirm = async () => {
     setSurveyConfirmed((prev) => [...prev, ...surveyPending])
-
     const rows = surveyPending.map((p) => ({
       name: p.display,
       prize: '배달의민족 상품권 5만원권',
       prize_type: 'survey' as const,
     }))
-
     await getSupabase().from('winners').insert(rows)
     setSurveyPending([])
   }
@@ -202,13 +201,11 @@ export default function Home() {
       ...prev,
       [luckyPrizeTab]: [...prev[luckyPrizeTab], ...luckyPending],
     }))
-
     const rows = luckyPending.map((p) => ({
       name: p.display,
       prize: luckyPrizeTab,
       prize_type: 'lucky' as const,
     }))
-
     await getSupabase().from('winners').insert(rows)
     setLuckyPending([])
   }
@@ -265,7 +262,6 @@ export default function Home() {
   const copyResults = () => {
     const surveyWinners = allWinners.filter((w) => w.prize_type === 'survey')
     const luckyWinners = allWinners.filter((w) => w.prize_type === 'lucky')
-
     let text = '=== 설문조사 경품추첨 당첨자 ===\n'
     surveyWinners.forEach((w, i) => {
       text += `${i + 1}. ${w.name}\n`
@@ -282,13 +278,122 @@ export default function Home() {
         text += `${i + 1}. ${n}\n`
       })
     })
-
     navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const tabs: { key: Tab; label: string }[] = [
+  const canStartDraw = surveyParticipants.length > 0 || luckyParticipants.length > 0
+
+  // ==================== SETUP MODE ====================
+  if (mode === 'setup') {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-gray-800 text-white py-4 px-4">
+          <h1 className="text-center text-xl font-bold">추첨 관리자 설정</h1>
+          <p className="text-center text-sm mt-1 opacity-75">
+            명단 업로드 후 &quot;추첨 화면으로 전환&quot; 버튼을 누르세요
+          </p>
+        </header>
+
+        <main className="max-w-2xl mx-auto p-6 space-y-6">
+          {/* Survey file upload */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-2">1. 설문조사 추첨 명단</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              엑셀 형식: A열(센터유형), B열(지역), C열(아이디+연락처 뒷번호)
+            </p>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
+                파일 선택
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={handleSurveyFileUpload}
+                />
+              </label>
+              {surveyFileName && (
+                <span className="text-sm text-gray-600">{surveyFileName}</span>
+              )}
+            </div>
+            {surveyParticipants.length > 0 && (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <span className="text-sm font-medium text-green-700">
+                  {surveyParticipants.length}명 로드 완료
+                </span>
+                <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
+                  {surveyParticipants.map((p, i) => (
+                    <div key={i} className="py-0.5">{i + 1}. {p.display}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="mt-4">
+              <label className="text-sm font-medium text-gray-700">추첨 인원</label>
+              <div className="flex items-center gap-3 mt-1">
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(1, surveyParticipants.length)}
+                  value={surveyCount}
+                  onChange={(e) => setSurveyCount(Number(e.target.value))}
+                  className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <span className="text-sm text-gray-500">명</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Lucky draw file upload */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-2">2. 럭키드로우 명단</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              엑셀 형식: B열(이름), C열(연락처) — 당첨 시 이름 + 연락처 뒷4자리 표시
+            </p>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
+                파일 선택
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={handleLuckyFileUpload}
+                />
+              </label>
+              {luckyFileName && (
+                <span className="text-sm text-gray-600">{luckyFileName}</span>
+              )}
+            </div>
+            {luckyParticipants.length > 0 && (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <span className="text-sm font-medium text-green-700">
+                  {luckyParticipants.length}명 로드 완료
+                </span>
+                <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
+                  {luckyParticipants.map((p, i) => (
+                    <div key={i} className="py-0.5">{i + 1}. {p.display}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Switch to draw mode */}
+          <button
+            onClick={() => setMode('draw')}
+            disabled={!canStartDraw}
+            className="w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg"
+          >
+            {canStartDraw ? '추첨 화면으로 전환' : '명단을 먼저 업로드하세요'}
+          </button>
+        </main>
+      </div>
+    )
+  }
+
+  // ==================== DRAW MODE ====================
+  const drawTabs: { key: Tab; label: string }[] = [
     { key: 'survey', label: '설문조사 추첨' },
     { key: 'lucky', label: '럭키드로우' },
     { key: 'results', label: '최종 결과' },
@@ -296,15 +401,22 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#e8f4fd] to-white">
-      <header className="bg-primary text-white py-4 px-4 shadow-lg">
+      <header className="bg-primary text-white py-4 px-4 shadow-lg relative">
         <h1 className="text-center text-xl md:text-2xl font-bold">
           2026년 국가·지역진로교육센터 및 진로체험지원센터 워크숍
         </h1>
         <p className="text-center text-sm md:text-base mt-1 opacity-90">경품추첨 이벤트</p>
+        <button
+          onClick={() => setMode('setup')}
+          className="absolute top-4 right-4 text-white/40 hover:text-white/80 text-xs transition-colors"
+          title="관리자 설정"
+        >
+          설정
+        </button>
       </header>
 
       <nav className="flex border-b border-gray-200 bg-white sticky top-0 z-10">
-        {tabs.map((tab) => (
+        {drawTabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -323,96 +435,48 @@ export default function Home() {
         {/* Tab 1: Survey Draw */}
         {activeTab === 'survey' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 업로드</h2>
-              <p className="text-sm text-gray-500 mb-3">
-                엑셀 형식: A열(센터유형), B열(지역), C열(아이디+연락처 뒷번호)
-              </p>
-              <div className="flex items-center gap-3">
-                <label className="text-sm text-white cursor-pointer bg-primary hover:bg-primary-dark px-4 py-2 rounded-lg transition-colors font-medium">
-                  엑셀 파일 업로드
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    className="hidden"
-                    onChange={handleSurveyFileUpload}
-                  />
-                </label>
-                {surveyFileName && (
-                  <span className="text-sm text-gray-600">{surveyFileName}</span>
-                )}
-              </div>
-              {surveyParticipants.length > 0 && (
-                <div className="mt-4 p-3 bg-primary-light rounded-lg">
-                  <span className="text-sm font-medium text-primary">
-                    참가자 {getSurveyPool().length}명 로드 완료
-                    {surveyConfirmed.length > 0 && ` (확정 ${surveyConfirmed.length}명 제외)`}
-                  </span>
-                  <div className="mt-2 max-h-32 overflow-y-auto text-xs text-gray-600 space-y-1">
-                    {surveyParticipants.slice(0, 5).map((p, i) => (
-                      <div key={i}>{p.display}</div>
-                    ))}
-                    {surveyParticipants.length > 5 && (
-                      <div className="text-gray-400">... 외 {surveyParticipants.length - 5}명</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-primary">추첨 인원</h2>
-                <span className="text-2xl font-bold text-primary">{surveyCount}명</span>
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={Math.max(1, getSurveyPool().length)}
-                value={surveyCount}
-                onChange={(e) => setSurveyCount(Number(e.target.value))}
-                className="w-full accent-[#1a6fb5]"
-              />
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
-                <span>1명</span>
-                <span>{Math.max(1, getSurveyPool().length)}명</span>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-md p-6 text-center">
+            <div className="bg-white rounded-xl shadow-md p-6 text-center min-h-[300px] flex flex-col items-center justify-center">
               {surveyDrawing && (
-                <div className="mb-4">
-                  <div className="text-4xl md:text-5xl font-bold text-primary drumroll-active py-8">
+                <div>
+                  <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
                     {surveyDrumName || '...'}
                   </div>
-                  <p className="text-gray-500 mt-2">추첨 중...</p>
+                  <p className="text-gray-500 mt-2 text-lg">추첨 중...</p>
                 </div>
               )}
 
               {!surveyDrawing && surveyPending.length === 0 && (
-                <button
-                  onClick={handleSurveyDraw}
-                  disabled={getSurveyPool().length === 0}
-                  className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 px-12 rounded-full transition-colors shadow-lg hover:shadow-xl"
-                >
-                  추첨 시작
-                </button>
+                <div>
+                  <p className="text-gray-400 mb-6 text-lg">
+                    설문에 참여해주신 모든 분들께 감사드립니다.
+                  </p>
+                  <p className="text-primary font-bold text-xl mb-8">
+                    배달의민족 상품권 5만원권 ({surveyCount}명)
+                  </p>
+                  <button
+                    onClick={handleSurveyDraw}
+                    disabled={getSurveyPool().length === 0}
+                    className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl"
+                  >
+                    추첨 시작
+                  </button>
+                </div>
               )}
 
               {!surveyDrawing && surveyPending.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-bold text-gray-700 mb-4">당첨자 발표!</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                <div className="w-full">
+                  <h3 className="text-2xl font-bold text-gray-700 mb-6">당첨을 축하합니다!</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
                     {surveyPending.map((p, i) => (
                       <div
                         key={i}
-                        className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-lg p-4 shadow-md text-left"
+                        className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-xl p-5 shadow-lg text-left"
                         style={{ animationDelay: `${i * 0.1}s` }}
                       >
-                        <div className="text-base font-bold">{p.display}</div>
+                        <div className="text-lg font-bold">{p.display}</div>
                         <button
                           onClick={() => handleSurveyRedrawOne(i)}
-                          className="text-xs mt-2 opacity-75 hover:opacity-100 underline"
+                          className="text-xs mt-2 opacity-60 hover:opacity-100 underline"
                         >
                           재추첨
                         </button>
@@ -422,7 +486,7 @@ export default function Home() {
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={handleSurveyConfirm}
-                      className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors"
+                      className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors text-lg"
                     >
                       당첨 확인
                     </button>
@@ -460,44 +524,6 @@ export default function Home() {
         {/* Tab 2: Lucky Draw */}
         {activeTab === 'lucky' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-lg font-bold text-primary mb-4">참가자 명단 업로드</h2>
-              <p className="text-sm text-gray-500 mb-3">
-                엑셀 형식: B열(이름), C열(연락처) — 당첨 시 이름 + 연락처 뒷 4자리 표시
-              </p>
-              <div className="flex items-center gap-3">
-                <label className="text-sm text-white cursor-pointer bg-primary hover:bg-primary-dark px-4 py-2 rounded-lg transition-colors font-medium">
-                  엑셀 파일 업로드
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    className="hidden"
-                    onChange={handleLuckyFileUpload}
-                  />
-                </label>
-                {luckyFileName && (
-                  <span className="text-sm text-gray-600">{luckyFileName}</span>
-                )}
-              </div>
-              {luckyParticipants.length > 0 && (
-                <div className="mt-4 p-3 bg-primary-light rounded-lg">
-                  <span className="text-sm font-medium text-primary">
-                    참가자 {getLuckyPool().length}명 로드 완료
-                    {Object.values(luckyConfirmed).flat().length > 0 &&
-                      ` (확정 ${Object.values(luckyConfirmed).flat().length}명 제외)`}
-                  </span>
-                  <div className="mt-2 max-h-32 overflow-y-auto text-xs text-gray-600 space-y-1">
-                    {luckyParticipants.slice(0, 5).map((p, i) => (
-                      <div key={i}>{p.display}</div>
-                    ))}
-                    {luckyParticipants.length > 5 && (
-                      <div className="text-gray-400">... 외 {luckyParticipants.length - 5}명</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div className="bg-white rounded-xl shadow-md overflow-hidden">
               <div className="flex border-b">
                 {LUCKY_PRIZES.map((prize) => (
@@ -522,25 +548,26 @@ export default function Home() {
                 ))}
               </div>
 
-              <div className="p-6 text-center">
+              <div className="p-6 text-center min-h-[300px] flex flex-col items-center justify-center">
                 {luckyDrawing && (
-                  <div className="mb-4">
-                    <div className="text-4xl md:text-5xl font-bold text-primary drumroll-active py-8">
+                  <div>
+                    <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
                       {luckyDrumName || '...'}
                     </div>
-                    <p className="text-gray-500 mt-2">추첨 중...</p>
+                    <p className="text-gray-500 mt-2 text-lg">추첨 중...</p>
                   </div>
                 )}
 
                 {!luckyDrawing && luckyPending.length === 0 && (
                   <div>
-                    <p className="text-gray-500 mb-4">
-                      {luckyPrizeTab} — 남은 추첨: {currentPrizeRemaining}명
+                    <p className="text-gray-400 mb-6 text-lg">행운의 주인공을 기다립니다!</p>
+                    <p className="text-primary font-bold text-xl mb-8">
+                      {luckyPrizeTab} ({currentPrizeRemaining}명 남음)
                     </p>
                     <button
                       onClick={handleLuckyDraw}
                       disabled={currentPrizeRemaining <= 0 || getLuckyPool().length === 0}
-                      className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 px-12 rounded-full transition-colors shadow-lg hover:shadow-xl"
+                      className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl"
                     >
                       {currentPrizeRemaining <= 0 ? '추첨 완료' : '추첨 시작'}
                     </button>
@@ -548,21 +575,21 @@ export default function Home() {
                 )}
 
                 {!luckyDrawing && luckyPending.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-700 mb-4">
-                      {luckyPrizeTab} 당첨자!
+                  <div className="w-full">
+                    <h3 className="text-2xl font-bold text-gray-700 mb-6">
+                      {luckyPrizeTab} 당첨을 축하합니다!
                     </h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
                       {luckyPending.map((p, i) => (
                         <div
                           key={i}
-                          className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-lg p-3 shadow-md"
+                          className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-xl p-4 shadow-lg"
                           style={{ animationDelay: `${i * 0.1}s` }}
                         >
                           <div className="text-lg font-bold">{p.display}</div>
                           <button
                             onClick={() => handleLuckyRedrawOne(i)}
-                            className="text-xs mt-1 opacity-75 hover:opacity-100 underline"
+                            className="text-xs mt-2 opacity-60 hover:opacity-100 underline"
                           >
                             재추첨
                           </button>
@@ -572,7 +599,7 @@ export default function Home() {
                     <div className="flex gap-3 justify-center">
                       <button
                         onClick={handleLuckyConfirm}
-                        className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors"
+                        className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors text-lg"
                       >
                         당첨 확인
                       </button>
@@ -657,9 +684,7 @@ export default function Home() {
                           key={w.id}
                           className="bg-primary-light text-primary rounded-lg p-3 text-sm"
                         >
-                          <div className="font-bold">
-                            {i + 1}. {w.name}
-                          </div>
+                          <div className="font-bold">{i + 1}. {w.name}</div>
                         </div>
                       ))}
                   </div>
@@ -688,9 +713,7 @@ export default function Home() {
                                 key={w.id}
                                 className="bg-primary-light text-primary rounded-lg p-3 text-sm"
                               >
-                                <div className="font-bold">
-                                  {i + 1}. {w.name}
-                                </div>
+                                <div className="font-bold">{i + 1}. {w.name}</div>
                               </div>
                             ))}
                           </div>
