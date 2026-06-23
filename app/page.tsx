@@ -97,11 +97,20 @@ function stopDrumRoll() {
   }
 }
 
-function playFanfare() {
-  // audio continues naturally from drumroll to fanfare - no restart needed
+function stopAudioAt(sec: number) {
+  if (!sfxAudio) return
+  const check = () => {
+    if (sfxAudio && sfxAudio.currentTime >= sec) {
+      sfxAudio.pause()
+      sfxAudio.currentTime = 0
+      return
+    }
+    if (sfxAudio && !sfxAudio.paused) requestAnimationFrame(check)
+  }
+  requestAnimationFrame(check)
 }
 
-function fireConfetti() {
+function fireConfetti(durationMs = 2000) {
   const canvas = document.getElementById('confetti-canvas') as HTMLCanvasElement | null
   if (!canvas) return
   const ctx = canvas.getContext('2d')
@@ -116,13 +125,13 @@ function fireConfetti() {
     shape: number; life: number
   }[] = []
 
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 200; i++) {
     particles.push({
-      x: canvas.width / 2 + (Math.random() - 0.5) * 200,
-      y: canvas.height * 0.4,
-      vx: (Math.random() - 0.5) * 16,
-      vy: -Math.random() * 18 - 4,
-      size: Math.random() * 8 + 4,
+      x: canvas.width * (0.2 + Math.random() * 0.6),
+      y: canvas.height * (0.2 + Math.random() * 0.3),
+      vx: (Math.random() - 0.5) * 18,
+      vy: -Math.random() * 20 - 5,
+      size: Math.random() * 10 + 4,
       color: colors[Math.floor(Math.random() * colors.length)],
       rotation: Math.random() * 360,
       vr: (Math.random() - 0.5) * 15,
@@ -131,8 +140,9 @@ function fireConfetti() {
     })
   }
 
+  const fps = 60
+  const maxFrames = Math.floor((durationMs / 1000) * fps)
   let frame = 0
-  const maxFrames = 120
 
   function animate() {
     if (frame >= maxFrames) {
@@ -142,9 +152,9 @@ function fireConfetti() {
     ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
     particles.forEach((p) => {
       p.x += p.vx
-      p.vy += 0.4
+      p.vy += 0.35
       p.y += p.vy
-      p.vx *= 0.98
+      p.vx *= 0.985
       p.rotation += p.vr
       p.life = Math.max(0, 1 - frame / maxFrames)
 
@@ -243,21 +253,28 @@ export default function Home() {
     setPending([])
     setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
     playDrumRoll()
+
+    // Name cycling animation: runs for 5.5s synced with audio
+    const revealAt = 5500
+    const interval = 100
     let tick = 0
-    const totalTicks = 30
     const run = () => {
       tick++
       setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-      if (tick >= totalTicks) {
-        if (timerRef.current) clearInterval(timerRef.current)
-        setPending(shuffle(pool).slice(0, drawCount))
-        setDrumNameFn('')
-        setDrawing(false)
-        stopDrumRoll()
-        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
-      }
     }
-    timerRef.current = setInterval(run, 100)
+    timerRef.current = setInterval(run, interval)
+
+    // Reveal winners at 5.5s (when fanfare hits in the audio)
+    setTimeout(() => {
+      if (timerRef.current) clearInterval(timerRef.current)
+      setPending(shuffle(pool).slice(0, drawCount))
+      setDrumNameFn('')
+      setDrawing(false)
+      // Confetti at 6s (0.5s after reveal), lasts 2s (until ~8s)
+      setTimeout(() => fireConfetti(2000), 500)
+      // Audio continues, auto-stop at 10s
+      stopAudioAt(10)
+    }, revealAt)
   }
 
   // Survey handlers
@@ -355,7 +372,8 @@ export default function Home() {
         )
         setRedrawingIdx(null)
         setRedrawingType(null)
-        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
+        setTimeout(() => fireConfetti(2000), 500)
+        stopAudioAt(10)
       }
     }, 80)
   }
@@ -469,7 +487,8 @@ export default function Home() {
         )
         setRedrawingIdx(null)
         setRedrawingType(null)
-        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
+        setTimeout(() => fireConfetti(2000), 500)
+        stopAudioAt(10)
       }
     }, 80)
   }
