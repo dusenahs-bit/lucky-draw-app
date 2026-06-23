@@ -4,8 +4,8 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { getSupabase, type Winner } from '../lib/supabase'
 
-type Tab = 'survey' | 'lucky' | 'results'
 type Mode = 'setup' | 'draw'
+type DrawPage = 'home' | 'survey' | 'lucky' | 'results'
 type LuckyPrize = '논픽션 핸드크림' | '하이드로 텀블러' | 'TWG Tea'
 
 interface Participant {
@@ -45,11 +45,7 @@ function parseSurveyExcel(data: Uint8Array): Participant[] {
       const type = String(row[0] ?? '').trim()
       const region = String(row[1] ?? '').trim()
       const idInfo = String(row[2] ?? '').trim()
-      return {
-        key: idInfo,
-        drumName: idInfo,
-        display: `${type} | ${region} | ${idInfo}`,
-      }
+      return { key: idInfo, drumName: idInfo, display: `${type} | ${region} | ${idInfo}` }
     })
 }
 
@@ -74,7 +70,7 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>('setup')
-  const [activeTab, setActiveTab] = useState<Tab>('survey')
+  const [drawPage, setDrawPage] = useState<DrawPage>('home')
 
   // Survey state
   const [surveyParticipants, setSurveyParticipants] = useState<Participant[]>([])
@@ -83,6 +79,7 @@ export default function Home() {
   const [surveyDrawing, setSurveyDrawing] = useState(false)
   const [surveyDrumName, setSurveyDrumName] = useState('')
   const [surveyPending, setSurveyPending] = useState<Participant[]>([])
+  const [surveyPendingConfirmed, setSurveyPendingConfirmed] = useState<Set<string>>(new Set())
   const [surveyConfirmed, setSurveyConfirmed] = useState<Participant[]>([])
   const surveyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -93,6 +90,7 @@ export default function Home() {
   const [luckyDrawing, setLuckyDrawing] = useState(false)
   const [luckyDrumName, setLuckyDrumName] = useState('')
   const [luckyPending, setLuckyPending] = useState<Participant[]>([])
+  const [luckyPendingConfirmed, setLuckyPendingConfirmed] = useState<Set<string>>(new Set())
   const [luckyConfirmed, setLuckyConfirmed] = useState<Record<LuckyPrize, Participant[]>>({
     '논픽션 핸드크림': [],
     '하이드로 텀블러': [],
@@ -134,48 +132,36 @@ export default function Home() {
     setDrawing(true)
     setPending([])
     setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-
     let tick = 0
     const totalTicks = 30
-
     const run = () => {
       tick++
       setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
       if (tick >= totalTicks) {
         if (timerRef.current) clearInterval(timerRef.current)
-        const winners = shuffle(pool).slice(0, drawCount)
-        setPending(winners)
+        setPending(shuffle(pool).slice(0, drawCount))
         setDrumNameFn('')
         setDrawing(false)
       }
     }
-
     timerRef.current = setInterval(run, 100)
   }
 
   // Survey handlers
   const handleSurveyDraw = () => {
-    const pool = getSurveyPool()
     setSurveyPending([])
-    startDrumRoll(pool, surveyCount, setSurveyDrumName, setSurveyDrawing, setSurveyPending, surveyTimerRef)
+    setSurveyPendingConfirmed(new Set())
+    startDrumRoll(getSurveyPool(), surveyCount, setSurveyDrumName, setSurveyDrawing, setSurveyPending, surveyTimerRef)
   }
 
-  const handleSurveyConfirm = async () => {
-    setSurveyConfirmed((prev) => [...prev, ...surveyPending])
-    const rows = surveyPending.map((p) => ({
+  const handleSurveyConfirmOne = async (p: Participant) => {
+    setSurveyConfirmed((prev) => [...prev, p])
+    setSurveyPendingConfirmed((prev) => new Set(prev).add(p.key))
+    await getSupabase().from('winners').insert({
       name: p.display,
       prize: '배달의민족 상품권 5만원권',
-      prize_type: 'survey' as const,
-    }))
-    await getSupabase().from('winners').insert(rows)
-    setSurveyPending([])
-  }
-
-  const handleSurveyRedraw = () => {
-    const pendingKeys = new Set(surveyPending.map((p) => p.key))
-    const pool = getSurveyPool().filter((p) => !pendingKeys.has(p.key))
-    setSurveyPending([])
-    startDrumRoll(pool, surveyCount, setSurveyDrumName, setSurveyDrawing, setSurveyPending, surveyTimerRef)
+      prize_type: 'survey',
+    })
   }
 
   const handleSurveyRedrawOne = (idx: number) => {
@@ -185,29 +171,56 @@ export default function Home() {
     ])
     const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
     if (pool.length === 0) return
-    const replacement = shuffle(pool)[0]
-    setSurveyPending((prev) => prev.map((p, i) => (i === idx ? replacement : p)))
+    setSurveyPending((prev) => prev.map((p, i) => (i === idx ? shuffle(pool)[0] : p)))
+  }
+
+  const handleSurveyRedrawUnconfirmed = () => {
+    const unconfirmed = surveyPending.filter((p) => !surveyPendingConfirmed.has(p.key))
+    const count = unconfirmed.length
+    if (count === 0) return
+    const excludedKeys = new Set([
+      ...surveyConfirmed.map((p) => p.key),
+      ...surveyPending.filter((p) => surveyPendingConfirmed.has(p.key)).map((p) => p.key),
+    ])
+    const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
+    const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+    let newIdx = 0
+    setSurveyPending((prev) =>
+      prev.map((p) => {
+        if (!surveyPendingConfirmed.has(p.key) && newIdx < newWinners.length) {
+          return newWinners[newIdx++]
+        }
+        return p
+      })
+    )
+  }
+
+  const surveyAllConfirmed =
+    surveyPending.length > 0 && surveyPending.every((p) => surveyPendingConfirmed.has(p.key))
+
+  const handleSurveyFinishBatch = () => {
+    setSurveyPending([])
+    setSurveyPendingConfirmed(new Set())
   }
 
   // Lucky draw handlers
   const handleLuckyDraw = () => {
-    const pool = getLuckyPool()
     setLuckyPending([])
-    startDrumRoll(pool, currentPrizeRemaining, setLuckyDrumName, setLuckyDrawing, setLuckyPending, luckyTimerRef)
+    setLuckyPendingConfirmed(new Set())
+    startDrumRoll(getLuckyPool(), currentPrizeRemaining, setLuckyDrumName, setLuckyDrawing, setLuckyPending, luckyTimerRef)
   }
 
-  const handleLuckyConfirm = async () => {
+  const handleLuckyConfirmOne = async (p: Participant) => {
     setLuckyConfirmed((prev) => ({
       ...prev,
-      [luckyPrizeTab]: [...prev[luckyPrizeTab], ...luckyPending],
+      [luckyPrizeTab]: [...prev[luckyPrizeTab], p],
     }))
-    const rows = luckyPending.map((p) => ({
+    setLuckyPendingConfirmed((prev) => new Set(prev).add(p.key))
+    await getSupabase().from('winners').insert({
       name: p.display,
       prize: luckyPrizeTab,
-      prize_type: 'lucky' as const,
-    }))
-    await getSupabase().from('winners').insert(rows)
-    setLuckyPending([])
+      prize_type: 'lucky',
+    })
   }
 
   const handleLuckyRedrawOne = (idx: number) => {
@@ -217,8 +230,36 @@ export default function Home() {
       (p) => !allConfirmedKeys.has(p.key) && !pendingKeys.has(p.key)
     )
     if (pool.length === 0) return
-    const replacement = shuffle(pool)[0]
-    setLuckyPending((prev) => prev.map((p, i) => (i === idx ? replacement : p)))
+    setLuckyPending((prev) => prev.map((p, i) => (i === idx ? shuffle(pool)[0] : p)))
+  }
+
+  const handleLuckyRedrawUnconfirmed = () => {
+    const unconfirmed = luckyPending.filter((p) => !luckyPendingConfirmed.has(p.key))
+    const count = unconfirmed.length
+    if (count === 0) return
+    const allConfirmedKeys = getAllLuckyConfirmedKeys()
+    const keepKeys = new Set(luckyPending.filter((p) => luckyPendingConfirmed.has(p.key)).map((p) => p.key))
+    const pool = luckyParticipants.filter(
+      (p) => !allConfirmedKeys.has(p.key) && !keepKeys.has(p.key)
+    )
+    const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+    let newIdx = 0
+    setLuckyPending((prev) =>
+      prev.map((p) => {
+        if (!luckyPendingConfirmed.has(p.key) && newIdx < newWinners.length) {
+          return newWinners[newIdx++]
+        }
+        return p
+      })
+    )
+  }
+
+  const luckyAllConfirmed =
+    luckyPending.length > 0 && luckyPending.every((p) => luckyPendingConfirmed.has(p.key))
+
+  const handleLuckyFinishBatch = () => {
+    setLuckyPending([])
+    setLuckyPendingConfirmed(new Set())
   }
 
   // File upload handlers
@@ -228,8 +269,7 @@ export default function Home() {
     setSurveyFileName(file.name)
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const data = new Uint8Array(ev.target?.result as ArrayBuffer)
-      setSurveyParticipants(parseSurveyExcel(data))
+      setSurveyParticipants(parseSurveyExcel(new Uint8Array(ev.target?.result as ArrayBuffer)))
     }
     reader.readAsArrayBuffer(file)
   }
@@ -240,8 +280,7 @@ export default function Home() {
     setLuckyFileName(file.name)
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const data = new Uint8Array(ev.target?.result as ArrayBuffer)
-      setLuckyParticipants(parseLuckyExcel(data))
+      setLuckyParticipants(parseLuckyExcel(new Uint8Array(ev.target?.result as ArrayBuffer)))
     }
     reader.readAsArrayBuffer(file)
   }
@@ -256,16 +295,14 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (activeTab === 'results') loadResults()
-  }, [activeTab])
+    if (drawPage === 'results') loadResults()
+  }, [drawPage])
 
   const copyResults = () => {
     const surveyWinners = allWinners.filter((w) => w.prize_type === 'survey')
     const luckyWinners = allWinners.filter((w) => w.prize_type === 'lucky')
     let text = '=== 설문조사 경품추첨 당첨자 ===\n'
-    surveyWinners.forEach((w, i) => {
-      text += `${i + 1}. ${w.name}\n`
-    })
+    surveyWinners.forEach((w, i) => { text += `${i + 1}. ${w.name}\n` })
     text += '\n=== 럭키드로우 당첨자 ===\n'
     const grouped: Record<string, string[]> = {}
     luckyWinners.forEach((w) => {
@@ -274,9 +311,7 @@ export default function Home() {
     })
     Object.entries(grouped).forEach(([prize, names]) => {
       text += `\n[${prize}]\n`
-      names.forEach((n, i) => {
-        text += `${i + 1}. ${n}\n`
-      })
+      names.forEach((n, i) => { text += `${i + 1}. ${n}\n` })
     })
     navigator.clipboard.writeText(text)
     setCopied(true)
@@ -295,9 +330,7 @@ export default function Home() {
             명단 업로드 후 &quot;추첨 화면으로 전환&quot; 버튼을 누르세요
           </p>
         </header>
-
         <main className="max-w-2xl mx-auto p-6 space-y-6">
-          {/* Survey file upload */}
           <div className="bg-white rounded-xl shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-2">1. 설문조사 추첨 명단</h2>
             <p className="text-sm text-gray-500 mb-4">
@@ -306,46 +339,29 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
                 파일 선택
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={handleSurveyFileUpload}
-                />
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleSurveyFileUpload} />
               </label>
-              {surveyFileName && (
-                <span className="text-sm text-gray-600">{surveyFileName}</span>
-              )}
+              {surveyFileName && <span className="text-sm text-gray-600">{surveyFileName}</span>}
             </div>
             {surveyParticipants.length > 0 && (
               <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <span className="text-sm font-medium text-green-700">
-                  {surveyParticipants.length}명 로드 완료
-                </span>
+                <span className="text-sm font-medium text-green-700">{surveyParticipants.length}명 로드 완료</span>
                 <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
-                  {surveyParticipants.map((p, i) => (
-                    <div key={i} className="py-0.5">{i + 1}. {p.display}</div>
-                  ))}
+                  {surveyParticipants.map((p, i) => (<div key={i} className="py-0.5">{i + 1}. {p.display}</div>))}
                 </div>
               </div>
             )}
             <div className="mt-4">
               <label className="text-sm font-medium text-gray-700">추첨 인원</label>
               <div className="flex items-center gap-3 mt-1">
-                <input
-                  type="number"
-                  min={1}
-                  max={Math.max(1, surveyParticipants.length)}
-                  value={surveyCount}
+                <input type="number" min={1} max={Math.max(1, surveyParticipants.length)} value={surveyCount}
                   onChange={(e) => setSurveyCount(Number(e.target.value))}
-                  className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
+                  className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                 <span className="text-sm text-gray-500">명</span>
               </div>
             </div>
           </div>
 
-          {/* Lucky draw file upload */}
           <div className="bg-white rounded-xl shadow-md p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-2">2. 럭키드로우 명단</h2>
             <p className="text-sm text-gray-500 mb-4">
@@ -354,37 +370,22 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
                 파일 선택
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={handleLuckyFileUpload}
-                />
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleLuckyFileUpload} />
               </label>
-              {luckyFileName && (
-                <span className="text-sm text-gray-600">{luckyFileName}</span>
-              )}
+              {luckyFileName && <span className="text-sm text-gray-600">{luckyFileName}</span>}
             </div>
             {luckyParticipants.length > 0 && (
               <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <span className="text-sm font-medium text-green-700">
-                  {luckyParticipants.length}명 로드 완료
-                </span>
+                <span className="text-sm font-medium text-green-700">{luckyParticipants.length}명 로드 완료</span>
                 <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
-                  {luckyParticipants.map((p, i) => (
-                    <div key={i} className="py-0.5">{i + 1}. {p.display}</div>
-                  ))}
+                  {luckyParticipants.map((p, i) => (<div key={i} className="py-0.5">{i + 1}. {p.display}</div>))}
                 </div>
               </div>
             )}
           </div>
 
-          {/* Switch to draw mode */}
-          <button
-            onClick={() => setMode('draw')}
-            disabled={!canStartDraw}
-            className="w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg"
-          >
+          <button onClick={() => { setMode('draw'); setDrawPage('home') }} disabled={!canStartDraw}
+            className="w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg">
             {canStartDraw ? '추첨 화면으로 전환' : '명단을 먼저 업로드하세요'}
           </button>
         </main>
@@ -393,49 +394,52 @@ export default function Home() {
   }
 
   // ==================== DRAW MODE ====================
-  const drawTabs: { key: Tab; label: string }[] = [
-    { key: 'survey', label: '설문조사 추첨' },
-    { key: 'lucky', label: '럭키드로우' },
-    { key: 'results', label: '최종 결과' },
-  ]
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#e8f4fd] to-white">
-      <header className="bg-primary text-white py-4 px-4 shadow-lg relative">
-        <h1 className="text-center text-xl md:text-2xl font-bold">
-          2026년 국가·지역진로교육센터 및 진로체험지원센터 워크숍
-        </h1>
-        <p className="text-center text-sm md:text-base mt-1 opacity-90">경품추첨 이벤트</p>
-        <button
-          onClick={() => setMode('setup')}
-          className="absolute top-4 right-4 text-white/40 hover:text-white/80 text-xs transition-colors"
-          title="관리자 설정"
-        >
+      <header className="bg-primary text-white py-5 px-4 shadow-lg relative">
+        <h1 className="text-center text-2xl md:text-3xl font-bold">경품추첨</h1>
+        <button onClick={() => setMode('setup')}
+          className="absolute top-5 right-4 text-white/30 hover:text-white/80 text-xs transition-colors" title="관리자 설정">
           설정
         </button>
       </header>
 
-      <nav className="flex border-b border-gray-200 bg-white sticky top-0 z-10">
-        {drawTabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 py-3 px-4 text-sm md:text-base font-medium transition-colors ${
-              activeTab === tab.key
-                ? 'text-primary border-b-2 border-primary bg-primary-light/50'
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-
       <main className="max-w-3xl mx-auto p-4 md:p-6">
-        {/* Tab 1: Survey Draw */}
-        {activeTab === 'survey' && (
+        {/* HOME: Draw selection */}
+        {drawPage === 'home' && (
+          <div className="space-y-4 mt-8">
+            <button onClick={() => setDrawPage('survey')}
+              className="w-full bg-white hover:bg-primary-light rounded-2xl shadow-lg p-8 text-left transition-colors group">
+              <h2 className="text-2xl font-bold text-primary group-hover:text-primary-dark">설문조사 경품추첨</h2>
+              <p className="text-gray-500 mt-2">배달의민족 상품권 5만원권 · {surveyCount}명</p>
+              {surveyConfirmed.length > 0 && (
+                <p className="text-sm text-green-600 mt-1">확정 {surveyConfirmed.length}명</p>
+              )}
+            </button>
+            <button onClick={() => setDrawPage('lucky')}
+              className="w-full bg-white hover:bg-primary-light rounded-2xl shadow-lg p-8 text-left transition-colors group">
+              <h2 className="text-2xl font-bold text-primary group-hover:text-primary-dark">럭키드로우</h2>
+              <p className="text-gray-500 mt-2">논픽션 핸드크림 5명 · 하이드로 텀블러 3명 · TWG Tea 3명</p>
+              {Object.values(luckyConfirmed).flat().length > 0 && (
+                <p className="text-sm text-green-600 mt-1">확정 {Object.values(luckyConfirmed).flat().length}명</p>
+              )}
+            </button>
+            <button onClick={() => setDrawPage('results')}
+              className="w-full bg-white hover:bg-gray-50 rounded-2xl shadow-lg p-8 text-left transition-colors group">
+              <h2 className="text-2xl font-bold text-gray-600 group-hover:text-gray-800">최종 결과</h2>
+              <p className="text-gray-400 mt-2">전체 당첨자 조회 및 복사</p>
+            </button>
+          </div>
+        )}
+
+        {/* SURVEY DRAW */}
+        {drawPage === 'survey' && (
           <div className="space-y-6">
-            <div className="bg-white rounded-xl shadow-md p-6 text-center min-h-[300px] flex flex-col items-center justify-center">
+            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
+              ← 돌아가기
+            </button>
+
+            <div className="bg-white rounded-xl shadow-md p-6 text-center min-h-[350px] flex flex-col items-center justify-center">
               {surveyDrawing && (
                 <div>
                   <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
@@ -447,18 +451,12 @@ export default function Home() {
 
               {!surveyDrawing && surveyPending.length === 0 && (
                 <div>
-                  <p className="text-gray-400 mb-6 text-lg">
-                    설문에 참여해주신 모든 분들께 감사드립니다.
-                  </p>
-                  <p className="text-primary font-bold text-xl mb-8">
-                    배달의민족 상품권 5만원권 ({surveyCount}명)
-                  </p>
-                  <button
-                    onClick={handleSurveyDraw}
-                    disabled={getSurveyPool().length === 0}
-                    className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl"
-                  >
-                    추첨 시작
+                  <h2 className="text-primary font-bold text-2xl mb-8">
+                    배달의민족 상품권 5만원권
+                  </h2>
+                  <button onClick={handleSurveyDraw} disabled={getSurveyPool().length === 0}
+                    className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl">
+                    추첨 시작 ({surveyCount}명)
                   </button>
                 </div>
               )}
@@ -467,35 +465,47 @@ export default function Home() {
                 <div className="w-full">
                   <h3 className="text-2xl font-bold text-gray-700 mb-6">당첨을 축하합니다!</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
-                    {surveyPending.map((p, i) => (
-                      <div
-                        key={i}
-                        className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-xl p-5 shadow-lg text-left"
-                        style={{ animationDelay: `${i * 0.1}s` }}
-                      >
-                        <div className="text-lg font-bold">{p.display}</div>
-                        <button
-                          onClick={() => handleSurveyRedrawOne(i)}
-                          className="text-xs mt-2 opacity-60 hover:opacity-100 underline"
-                        >
-                          재추첨
-                        </button>
-                      </div>
-                    ))}
+                    {surveyPending.map((p, i) => {
+                      const isConfirmed = surveyPendingConfirmed.has(p.key)
+                      return (
+                        <div key={p.key}
+                          className={`winner-reveal rounded-xl p-4 shadow-lg text-left transition-all ${
+                            isConfirmed
+                              ? 'bg-green-500 text-white'
+                              : 'bg-gradient-to-br from-primary to-primary-dark text-white'
+                          }`}
+                          style={{ animationDelay: `${i * 0.1}s` }}>
+                          <div className="text-base font-bold">{p.display}</div>
+                          {isConfirmed ? (
+                            <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                          ) : (
+                            <div className="flex gap-2 mt-3">
+                              <button onClick={() => handleSurveyConfirmOne(p)}
+                                className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full transition-colors">
+                                확인
+                              </button>
+                              <button onClick={() => handleSurveyRedrawOne(i)}
+                                className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors">
+                                재추첨
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                   <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={handleSurveyConfirm}
-                      className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors text-lg"
-                    >
-                      당첨 확인
-                    </button>
-                    <button
-                      onClick={handleSurveyRedraw}
-                      className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors"
-                    >
-                      전체 재추첨
-                    </button>
+                    {surveyAllConfirmed ? (
+                      <button onClick={handleSurveyFinishBatch}
+                        className="bg-primary hover:bg-primary-dark text-white font-bold py-3 px-8 rounded-full transition-colors text-lg">
+                        다음 추첨
+                      </button>
+                    ) : (
+                      <button onClick={handleSurveyRedrawUnconfirmed}
+                        className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors">
+                        미확인자 재추첨 ({surveyPending.filter((p) => !surveyPendingConfirmed.has(p.key)).length}명)
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -503,15 +513,10 @@ export default function Home() {
 
             {surveyConfirmed.length > 0 && (
               <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-lg font-bold text-primary mb-4">
-                  확정 당첨자 ({surveyConfirmed.length}명)
-                </h2>
+                <h2 className="text-lg font-bold text-primary mb-4">확정 당첨자 ({surveyConfirmed.length}명)</h2>
                 <div className="space-y-2">
                   {surveyConfirmed.map((p, i) => (
-                    <div
-                      key={i}
-                      className="bg-primary-light text-primary rounded-lg p-3 text-sm font-medium"
-                    >
+                    <div key={i} className="bg-primary-light text-primary rounded-lg p-3 text-sm font-medium">
                       {i + 1}. {p.display}
                     </div>
                   ))}
@@ -521,34 +526,30 @@ export default function Home() {
           </div>
         )}
 
-        {/* Tab 2: Lucky Draw */}
-        {activeTab === 'lucky' && (
+        {/* LUCKY DRAW */}
+        {drawPage === 'lucky' && (
           <div className="space-y-6">
+            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
+              ← 돌아가기
+            </button>
+
             <div className="bg-white rounded-xl shadow-md overflow-hidden">
               <div className="flex border-b">
                 {LUCKY_PRIZES.map((prize) => (
-                  <button
-                    key={prize.name}
-                    onClick={() => {
-                      setLuckyPrizeTab(prize.name)
-                      setLuckyPending([])
-                    }}
+                  <button key={prize.name}
+                    onClick={() => { setLuckyPrizeTab(prize.name); setLuckyPending([]); setLuckyPendingConfirmed(new Set()) }}
                     className={`flex-1 py-3 px-2 text-sm font-medium transition-colors ${
                       luckyPrizeTab === prize.name
                         ? 'text-primary border-b-2 border-primary bg-primary-light/50'
                         : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {prize.name}
-                    <br />
-                    <span className="text-xs">
-                      ({luckyConfirmed[prize.name].length}/{prize.count}명)
-                    </span>
+                    }`}>
+                    {prize.name}<br />
+                    <span className="text-xs">({luckyConfirmed[prize.name].length}/{prize.count}명)</span>
                   </button>
                 ))}
               </div>
 
-              <div className="p-6 text-center min-h-[300px] flex flex-col items-center justify-center">
+              <div className="p-6 text-center min-h-[350px] flex flex-col items-center justify-center">
                 {luckyDrawing && (
                   <div>
                     <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
@@ -560,55 +561,60 @@ export default function Home() {
 
                 {!luckyDrawing && luckyPending.length === 0 && (
                   <div>
-                    <p className="text-gray-400 mb-6 text-lg">행운의 주인공을 기다립니다!</p>
-                    <p className="text-primary font-bold text-xl mb-8">
-                      {luckyPrizeTab} ({currentPrizeRemaining}명 남음)
-                    </p>
-                    <button
-                      onClick={handleLuckyDraw}
+                    <h2 className="text-primary font-bold text-2xl mb-8">{luckyPrizeTab}</h2>
+                    <button onClick={handleLuckyDraw}
                       disabled={currentPrizeRemaining <= 0 || getLuckyPool().length === 0}
-                      className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl"
-                    >
-                      {currentPrizeRemaining <= 0 ? '추첨 완료' : '추첨 시작'}
+                      className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl">
+                      {currentPrizeRemaining <= 0 ? '추첨 완료' : `추첨 시작 (${currentPrizeRemaining}명)`}
                     </button>
                   </div>
                 )}
 
                 {!luckyDrawing && luckyPending.length > 0 && (
                   <div className="w-full">
-                    <h3 className="text-2xl font-bold text-gray-700 mb-6">
-                      {luckyPrizeTab} 당첨을 축하합니다!
-                    </h3>
+                    <h3 className="text-2xl font-bold text-gray-700 mb-6">{luckyPrizeTab} 당첨!</h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
-                      {luckyPending.map((p, i) => (
-                        <div
-                          key={i}
-                          className="winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white rounded-xl p-4 shadow-lg"
-                          style={{ animationDelay: `${i * 0.1}s` }}
-                        >
-                          <div className="text-lg font-bold">{p.display}</div>
-                          <button
-                            onClick={() => handleLuckyRedrawOne(i)}
-                            className="text-xs mt-2 opacity-60 hover:opacity-100 underline"
-                          >
-                            재추첨
-                          </button>
-                        </div>
-                      ))}
+                      {luckyPending.map((p, i) => {
+                        const isConfirmed = luckyPendingConfirmed.has(p.key)
+                        return (
+                          <div key={p.key}
+                            className={`winner-reveal rounded-xl p-4 shadow-lg transition-all ${
+                              isConfirmed
+                                ? 'bg-green-500 text-white'
+                                : 'bg-gradient-to-br from-primary to-primary-dark text-white'
+                            }`}
+                            style={{ animationDelay: `${i * 0.1}s` }}>
+                            <div className="text-lg font-bold">{p.display}</div>
+                            {isConfirmed ? (
+                              <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                            ) : (
+                              <div className="flex gap-2 mt-3">
+                                <button onClick={() => handleLuckyConfirmOne(p)}
+                                  className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full transition-colors">
+                                  확인
+                                </button>
+                                <button onClick={() => handleLuckyRedrawOne(i)}
+                                  className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors">
+                                  재추첨
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                     <div className="flex gap-3 justify-center">
-                      <button
-                        onClick={handleLuckyConfirm}
-                        className="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full transition-colors text-lg"
-                      >
-                        당첨 확인
-                      </button>
-                      <button
-                        onClick={handleLuckyDraw}
-                        className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors"
-                      >
-                        전체 재추첨
-                      </button>
+                      {luckyAllConfirmed ? (
+                        <button onClick={handleLuckyFinishBatch}
+                          className="bg-primary hover:bg-primary-dark text-white font-bold py-3 px-8 rounded-full transition-colors text-lg">
+                          다음 추첨
+                        </button>
+                      ) : (
+                        <button onClick={handleLuckyRedrawUnconfirmed}
+                          className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors">
+                          미확인자 재추첨 ({luckyPending.filter((p) => !luckyPendingConfirmed.has(p.key)).length}명)
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -618,101 +624,77 @@ export default function Home() {
             {Object.values(luckyConfirmed).flat().length > 0 && (
               <div className="bg-white rounded-xl shadow-md p-6">
                 <h2 className="text-lg font-bold text-primary mb-4">럭키드로우 당첨자</h2>
-                {LUCKY_PRIZES.map(
-                  (prize) =>
-                    luckyConfirmed[prize.name].length > 0 && (
-                      <div key={prize.name} className="mb-4 last:mb-0">
-                        <h3 className="text-sm font-bold text-gray-600 mb-2">
-                          {prize.name} ({luckyConfirmed[prize.name].length}/{prize.count}명)
-                        </h3>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                          {luckyConfirmed[prize.name].map((p, i) => (
-                            <div
-                              key={i}
-                              className="bg-primary-light text-primary rounded-lg p-2 text-center text-sm font-medium"
-                            >
-                              {i + 1}. {p.display}
-                            </div>
-                          ))}
-                        </div>
+                {LUCKY_PRIZES.map((prize) =>
+                  luckyConfirmed[prize.name].length > 0 && (
+                    <div key={prize.name} className="mb-4 last:mb-0">
+                      <h3 className="text-sm font-bold text-gray-600 mb-2">
+                        {prize.name} ({luckyConfirmed[prize.name].length}/{prize.count}명)
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {luckyConfirmed[prize.name].map((p, i) => (
+                          <div key={i} className="bg-primary-light text-primary rounded-lg p-2 text-center text-sm font-medium">
+                            {i + 1}. {p.display}
+                          </div>
+                        ))}
                       </div>
-                    )
+                    </div>
+                  )
                 )}
               </div>
             )}
           </div>
         )}
 
-        {/* Tab 3: Results */}
-        {activeTab === 'results' && (
+        {/* RESULTS */}
+        {drawPage === 'results' && (
           <div className="space-y-6">
+            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
+              ← 돌아가기
+            </button>
             <div className="bg-white rounded-xl shadow-md p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold text-primary">전체 당첨자 목록</h2>
                 <div className="flex gap-2">
-                  <button
-                    onClick={loadResults}
-                    className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors"
-                  >
+                  <button onClick={loadResults} className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
                     새로고침
                   </button>
-                  <button
-                    onClick={copyResults}
+                  <button onClick={copyResults}
                     className={`text-sm px-3 py-2 rounded-lg transition-colors ${
-                      copied
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-primary text-white hover:bg-primary-dark'
-                    }`}
-                  >
+                      copied ? 'bg-green-100 text-green-700' : 'bg-primary text-white hover:bg-primary-dark'
+                    }`}>
                     {copied ? '복사됨!' : '결과 복사'}
                   </button>
                 </div>
               </div>
-
               <div className="mb-6">
-                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">
-                  설문조사 경품추첨
-                </h3>
+                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">설문조사 경품추첨</h3>
                 {allWinners.filter((w) => w.prize_type === 'survey').length === 0 ? (
                   <p className="text-gray-400 text-sm">아직 당첨자가 없습니다.</p>
                 ) : (
                   <div className="space-y-2">
-                    {allWinners
-                      .filter((w) => w.prize_type === 'survey')
-                      .map((w, i) => (
-                        <div
-                          key={w.id}
-                          className="bg-primary-light text-primary rounded-lg p-3 text-sm"
-                        >
-                          <div className="font-bold">{i + 1}. {w.name}</div>
-                        </div>
-                      ))}
+                    {allWinners.filter((w) => w.prize_type === 'survey').map((w, i) => (
+                      <div key={w.id} className="bg-primary-light text-primary rounded-lg p-3 text-sm">
+                        <div className="font-bold">{i + 1}. {w.name}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-
               <div>
-                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">
-                  럭키드로우
-                </h3>
+                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">럭키드로우</h3>
                 {allWinners.filter((w) => w.prize_type === 'lucky').length === 0 ? (
                   <p className="text-gray-400 text-sm">아직 당첨자가 없습니다.</p>
                 ) : (
                   <>
                     {LUCKY_PRIZES.map((prize) => {
-                      const winners = allWinners.filter(
-                        (w) => w.prize_type === 'lucky' && w.prize === prize.name
-                      )
+                      const winners = allWinners.filter((w) => w.prize_type === 'lucky' && w.prize === prize.name)
                       if (winners.length === 0) return null
                       return (
                         <div key={prize.name} className="mb-4 last:mb-0">
                           <h4 className="text-sm font-bold text-gray-600 mb-2">{prize.name}</h4>
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                             {winners.map((w, i) => (
-                              <div
-                                key={w.id}
-                                className="bg-primary-light text-primary rounded-lg p-3 text-sm"
-                              >
+                              <div key={w.id} className="bg-primary-light text-primary rounded-lg p-3 text-sm">
                                 <div className="font-bold">{i + 1}. {w.name}</div>
                               </div>
                             ))}
