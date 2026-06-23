@@ -316,22 +316,20 @@ export default function Home() {
     setRedrawingIdx(idx)
     setRedrawingType('survey')
     playDrumRoll()
-    let tick = 0
-    const total = 15
     const timer = setInterval(() => {
-      tick++
       setSurveyPending((prev) => prev.map((p, i) =>
-        i === idx ? { ...shuffle(pool)[0], key: `_temp_${tick}` } : p
+        i === idx ? { ...shuffle(pool)[0], key: `_temp_${Date.now()}` } : p
       ))
-      if (tick >= total) {
-        clearInterval(timer)
-        const winner = shuffle(pool)[0]
-        setSurveyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
-        stopDrumRoll()
-        setRedrawingIdx(null)
-        setRedrawingType(null)
-      }
-    }, 80)
+    }, 100)
+    setTimeout(() => {
+      clearInterval(timer)
+      const winner = shuffle(pool)[0]
+      setSurveyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+      setRedrawingIdx(null)
+      setRedrawingType(null)
+      setTimeout(() => fireConfetti(2000), 500)
+      stopAudioAt(10)
+    }, 5500)
   }
 
   const handleSurveyRedrawUnconfirmed = () => {
@@ -346,36 +344,33 @@ export default function Home() {
     setRedrawingIdx(-1)
     setRedrawingType('survey')
     playDrumRoll()
-    let tick = 0
-    const total = 20
     const timer = setInterval(() => {
-      tick++
       setSurveyPending((prev) =>
         prev.map((p) => {
           if (!surveyPendingConfirmed.has(p.key)) {
-            return { ...shuffle(pool)[0], key: `_temp_${tick}_${Math.random()}` }
+            return { ...shuffle(pool)[0], key: `_temp_${Date.now()}_${Math.random()}` }
           }
           return p
         })
       )
-      if (tick >= total) {
-        clearInterval(timer)
-        const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-        let newIdx = 0
-        setSurveyPending((prev) =>
-          prev.map((p) => {
-            if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
-              return newWinners[newIdx++]
-            }
-            return p
-          })
-        )
-        setRedrawingIdx(null)
-        setRedrawingType(null)
-        setTimeout(() => fireConfetti(2000), 500)
-        stopAudioAt(10)
-      }
-    }, 80)
+    }, 100)
+    setTimeout(() => {
+      clearInterval(timer)
+      const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+      let newIdx = 0
+      setSurveyPending((prev) =>
+        prev.map((p) => {
+          if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
+            return newWinners[newIdx++]
+          }
+          return p
+        })
+      )
+      setRedrawingIdx(null)
+      setRedrawingType(null)
+      setTimeout(() => fireConfetti(2000), 500)
+      stopAudioAt(10)
+    }, 5500)
   }
 
   const surveyAllConfirmed =
@@ -431,22 +426,20 @@ export default function Home() {
     setRedrawingIdx(idx)
     setRedrawingType('lucky')
     playDrumRoll()
-    let tick = 0
-    const total = 15
     const timer = setInterval(() => {
-      tick++
       setLuckyPending((prev) => prev.map((p, i) =>
-        i === idx ? { ...shuffle(pool)[0], key: `_temp_${tick}` } : p
+        i === idx ? { ...shuffle(pool)[0], key: `_temp_${Date.now()}` } : p
       ))
-      if (tick >= total) {
-        clearInterval(timer)
-        const winner = shuffle(pool)[0]
-        setLuckyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
-        stopDrumRoll()
-        setRedrawingIdx(null)
-        setRedrawingType(null)
-      }
-    }, 80)
+    }, 100)
+    setTimeout(() => {
+      clearInterval(timer)
+      const winner = shuffle(pool)[0]
+      setLuckyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+      setRedrawingIdx(null)
+      setRedrawingType(null)
+      setTimeout(() => fireConfetti(2000), 500)
+      stopAudioAt(10)
+    }, 5500)
   }
 
   const handleLuckyRedrawUnconfirmed = () => {
@@ -461,36 +454,33 @@ export default function Home() {
     setRedrawingIdx(-1)
     setRedrawingType('lucky')
     playDrumRoll()
-    let tick = 0
-    const total = 20
     const timer = setInterval(() => {
-      tick++
       setLuckyPending((prev) =>
         prev.map((p) => {
           if (!luckyPendingConfirmed.has(p.key)) {
-            return { ...shuffle(pool)[0], key: `_temp_${tick}_${Math.random()}` }
+            return { ...shuffle(pool)[0], key: `_temp_${Date.now()}_${Math.random()}` }
           }
           return p
         })
       )
-      if (tick >= total) {
-        clearInterval(timer)
-        const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-        let newIdx = 0
-        setLuckyPending((prev) =>
-          prev.map((p) => {
-            if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
-              return newWinners[newIdx++]
-            }
-            return p
-          })
-        )
-        setRedrawingIdx(null)
-        setRedrawingType(null)
-        setTimeout(() => fireConfetti(2000), 500)
-        stopAudioAt(10)
-      }
-    }, 80)
+    }, 100)
+    setTimeout(() => {
+      clearInterval(timer)
+      const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+      let newIdx = 0
+      setLuckyPending((prev) =>
+        prev.map((p) => {
+          if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
+            return newWinners[newIdx++]
+          }
+          return p
+        })
+      )
+      setRedrawingIdx(null)
+      setRedrawingType(null)
+      setTimeout(() => fireConfetti(2000), 500)
+      stopAudioAt(10)
+    }, 5500)
   }
 
   const luckyAllConfirmed =
