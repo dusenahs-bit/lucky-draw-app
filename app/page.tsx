@@ -72,6 +72,84 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
     })
 }
 
+let audioCtx: AudioContext | null = null
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new AudioContext()
+  return audioCtx
+}
+
+function playDrumRoll(duration = 3) {
+  const ctx = getAudioCtx()
+  const now = ctx.currentTime
+  const steps = Math.floor(duration / 0.08)
+
+  for (let i = 0; i < steps; i++) {
+    const t = now + i * 0.08
+    const speed = i / steps
+
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(80 + speed * 60, t)
+    gain.gain.setValueAtTime(0.08 + speed * 0.12, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07)
+    osc.start(t)
+    osc.stop(t + 0.07)
+
+    const noise = ctx.createOscillator()
+    const noiseGain = ctx.createGain()
+    noise.connect(noiseGain)
+    noiseGain.connect(ctx.destination)
+    noise.type = 'sawtooth'
+    noise.frequency.setValueAtTime(200 + Math.random() * 100, t)
+    noiseGain.gain.setValueAtTime(0.03 + speed * 0.05, t)
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06)
+    noise.start(t)
+    noise.stop(t + 0.06)
+  }
+}
+
+function playFanfare() {
+  const ctx = getAudioCtx()
+  const now = ctx.currentTime
+
+  const notes = [
+    { freq: 523.25, start: 0, dur: 0.15 },
+    { freq: 659.25, start: 0.12, dur: 0.15 },
+    { freq: 783.99, start: 0.24, dur: 0.15 },
+    { freq: 1046.50, start: 0.36, dur: 0.4 },
+    { freq: 783.99, start: 0.36, dur: 0.4 },
+    { freq: 523.25, start: 0.36, dur: 0.4 },
+  ]
+
+  notes.forEach(({ freq, start, dur }) => {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.type = 'square'
+    osc.frequency.setValueAtTime(freq, now + start)
+    gain.gain.setValueAtTime(0.1, now + start)
+    gain.gain.setValueAtTime(0.1, now + start + dur * 0.7)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur)
+    osc.start(now + start)
+    osc.stop(now + start + dur)
+  })
+
+  const cymbal = ctx.createOscillator()
+  const cymbalGain = ctx.createGain()
+  cymbal.connect(cymbalGain)
+  cymbalGain.connect(ctx.destination)
+  cymbal.type = 'sawtooth'
+  cymbal.frequency.setValueAtTime(3000, now + 0.36)
+  cymbalGain.gain.setValueAtTime(0.06, now + 0.36)
+  cymbalGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0)
+  cymbal.start(now + 0.36)
+  cymbal.stop(now + 1.0)
+}
+
 function fireConfetti() {
   const canvas = document.getElementById('confetti-canvas') as HTMLCanvasElement | null
   if (!canvas) return
@@ -213,6 +291,7 @@ export default function Home() {
     setDrawing(true)
     setPending([])
     setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
+    playDrumRoll(3)
     let tick = 0
     const totalTicks = 30
     const run = () => {
@@ -223,7 +302,7 @@ export default function Home() {
         setPending(shuffle(pool).slice(0, drawCount))
         setDrumNameFn('')
         setDrawing(false)
-        setTimeout(() => fireConfetti(), 100)
+        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
       }
     }
     timerRef.current = setInterval(run, 100)
@@ -255,6 +334,7 @@ export default function Home() {
     if (pool.length === 0) return
     setRedrawingIdx(idx)
     setRedrawingType('survey')
+    playDrumRoll(1.2)
     let tick = 0
     const total = 15
     const timer = setInterval(() => {
@@ -283,6 +363,7 @@ export default function Home() {
     const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
     setRedrawingIdx(-1)
     setRedrawingType('survey')
+    playDrumRoll(1.6)
     let tick = 0
     const total = 20
     const timer = setInterval(() => {
@@ -309,7 +390,7 @@ export default function Home() {
         )
         setRedrawingIdx(null)
         setRedrawingType(null)
-        setTimeout(() => fireConfetti(), 100)
+        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
       }
     }, 80)
   }
@@ -351,6 +432,7 @@ export default function Home() {
     if (pool.length === 0) return
     setRedrawingIdx(idx)
     setRedrawingType('lucky')
+    playDrumRoll(1.2)
     let tick = 0
     const total = 15
     const timer = setInterval(() => {
@@ -379,6 +461,7 @@ export default function Home() {
     )
     setRedrawingIdx(-1)
     setRedrawingType('lucky')
+    playDrumRoll(1.6)
     let tick = 0
     const total = 20
     const timer = setInterval(() => {
@@ -405,7 +488,7 @@ export default function Home() {
         )
         setRedrawingIdx(null)
         setRedrawingType(null)
-        setTimeout(() => fireConfetti(), 100)
+        setTimeout(() => { fireConfetti(); playFanfare() }, 100)
       }
     }, 80)
   }
