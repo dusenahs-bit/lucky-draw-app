@@ -78,76 +78,119 @@ function getAudioCtx() {
   return audioCtx
 }
 
+function createNoise(ctx: AudioContext, duration: number): AudioBufferSourceNode {
+  const bufferSize = ctx.sampleRate * duration
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1
+  const source = ctx.createBufferSource()
+  source.buffer = buffer
+  return source
+}
+
+function playSnareHit(ctx: AudioContext, time: number, volume: number) {
+  const noise = createNoise(ctx, 0.1)
+  const noiseFilter = ctx.createBiquadFilter()
+  noiseFilter.type = 'highpass'
+  noiseFilter.frequency.setValueAtTime(3000, time)
+  const noiseGain = ctx.createGain()
+  noiseGain.gain.setValueAtTime(volume * 0.6, time)
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08)
+  noise.connect(noiseFilter)
+  noiseFilter.connect(noiseGain)
+  noiseGain.connect(ctx.destination)
+  noise.start(time)
+  noise.stop(time + 0.1)
+
+  const body = ctx.createOscillator()
+  const bodyGain = ctx.createGain()
+  body.type = 'triangle'
+  body.frequency.setValueAtTime(180, time)
+  body.frequency.exponentialRampToValueAtTime(80, time + 0.04)
+  bodyGain.gain.setValueAtTime(volume * 0.4, time)
+  bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.06)
+  body.connect(bodyGain)
+  bodyGain.connect(ctx.destination)
+  body.start(time)
+  body.stop(time + 0.08)
+}
+
 function playDrumRoll(duration = 3) {
   const ctx = getAudioCtx()
   const now = ctx.currentTime
-  const steps = Math.floor(duration / 0.08)
+  const totalHits = Math.floor(duration * 16)
 
-  for (let i = 0; i < steps; i++) {
-    const t = now + i * 0.08
-    const speed = i / steps
+  for (let i = 0; i < totalHits; i++) {
+    const progress = i / totalHits
+    const interval = 0.08 - progress * 0.04
+    let t = now
+    for (let j = 0; j < i; j++) {
+      t += 0.08 - (j / totalHits) * 0.04
+    }
+    if (t - now > duration) break
+    const vol = 0.06 + progress * 0.14
+    playSnareHit(ctx, t, vol)
+  }
+}
 
+function playBrass(ctx: AudioContext, freq: number, time: number, dur: number, vol: number) {
+  const harmonics = [1, 2, 3, 4, 5]
+  const amps = [1, 0.5, 0.3, 0.15, 0.08]
+  const master = ctx.createGain()
+  master.gain.setValueAtTime(0.001, time)
+  master.gain.linearRampToValueAtTime(vol, time + 0.04)
+  master.gain.setValueAtTime(vol * 0.8, time + dur * 0.3)
+  master.gain.linearRampToValueAtTime(vol * 0.7, time + dur * 0.8)
+  master.gain.exponentialRampToValueAtTime(0.001, time + dur)
+  master.connect(ctx.destination)
+
+  harmonics.forEach((h, idx) => {
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(freq * h, time)
+    gain.gain.setValueAtTime(amps[idx], time)
     osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.type = 'triangle'
-    osc.frequency.setValueAtTime(80 + speed * 60, t)
-    gain.gain.setValueAtTime(0.08 + speed * 0.12, t)
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07)
-    osc.start(t)
-    osc.stop(t + 0.07)
+    gain.connect(master)
+    osc.start(time)
+    osc.stop(time + dur + 0.05)
+  })
+}
 
-    const noise = ctx.createOscillator()
-    const noiseGain = ctx.createGain()
-    noise.connect(noiseGain)
-    noiseGain.connect(ctx.destination)
-    noise.type = 'sawtooth'
-    noise.frequency.setValueAtTime(200 + Math.random() * 100, t)
-    noiseGain.gain.setValueAtTime(0.03 + speed * 0.05, t)
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06)
-    noise.start(t)
-    noise.stop(t + 0.06)
-  }
+function playCymbalCrash(ctx: AudioContext, time: number) {
+  const noise = createNoise(ctx, 1.5)
+  const hp = ctx.createBiquadFilter()
+  hp.type = 'highpass'
+  hp.frequency.setValueAtTime(6000, time)
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(14000, time)
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0.12, time)
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 1.2)
+  noise.connect(hp)
+  hp.connect(lp)
+  lp.connect(gain)
+  gain.connect(ctx.destination)
+  noise.start(time)
+  noise.stop(time + 1.5)
 }
 
 function playFanfare() {
   const ctx = getAudioCtx()
   const now = ctx.currentTime
+  const v = 0.08
 
-  const notes = [
-    { freq: 523.25, start: 0, dur: 0.15 },
-    { freq: 659.25, start: 0.12, dur: 0.15 },
-    { freq: 783.99, start: 0.24, dur: 0.15 },
-    { freq: 1046.50, start: 0.36, dur: 0.4 },
-    { freq: 783.99, start: 0.36, dur: 0.4 },
-    { freq: 523.25, start: 0.36, dur: 0.4 },
-  ]
-
-  notes.forEach(({ freq, start, dur }) => {
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-    osc.type = 'square'
-    osc.frequency.setValueAtTime(freq, now + start)
-    gain.gain.setValueAtTime(0.1, now + start)
-    gain.gain.setValueAtTime(0.1, now + start + dur * 0.7)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur)
-    osc.start(now + start)
-    osc.stop(now + start + dur)
-  })
-
-  const cymbal = ctx.createOscillator()
-  const cymbalGain = ctx.createGain()
-  cymbal.connect(cymbalGain)
-  cymbalGain.connect(ctx.destination)
-  cymbal.type = 'sawtooth'
-  cymbal.frequency.setValueAtTime(3000, now + 0.36)
-  cymbalGain.gain.setValueAtTime(0.06, now + 0.36)
-  cymbalGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0)
-  cymbal.start(now + 0.36)
-  cymbal.stop(now + 1.0)
+  playBrass(ctx, 349.23, now, 0.2, v)
+  playBrass(ctx, 261.63, now, 0.2, v * 0.6)
+  playBrass(ctx, 440.00, now + 0.18, 0.2, v)
+  playBrass(ctx, 349.23, now + 0.18, 0.2, v * 0.6)
+  playBrass(ctx, 523.25, now + 0.36, 0.2, v * 1.1)
+  playBrass(ctx, 440.00, now + 0.36, 0.2, v * 0.6)
+  playBrass(ctx, 698.46, now + 0.54, 0.6, v * 1.2)
+  playBrass(ctx, 523.25, now + 0.54, 0.6, v * 0.8)
+  playBrass(ctx, 349.23, now + 0.54, 0.6, v * 0.5)
+  playCymbalCrash(ctx, now + 0.54)
 }
 
 function fireConfetti() {
