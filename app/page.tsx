@@ -59,11 +59,15 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
     .map((row) => {
       const name = String(row[1] ?? '').trim()
       const phone = String(row[2] ?? '').trim()
+      const org = String(row[4] ?? '').trim()
       const phoneLast4 = last4(phone)
+      const parts = [name]
+      if (phoneLast4) parts[0] = `${name} (${phoneLast4})`
+      if (org) parts.push(org)
       return {
         key: `${name}_${phoneLast4}`,
         drumName: name,
-        display: phoneLast4 ? `${name} (${phoneLast4})` : name,
+        display: parts.join(' · '),
       }
     })
 }
