@@ -35,20 +35,41 @@ body {
 }
 
 @keyframes winner-reveal {
-  0% { opacity: 0; transform: scale(0.8); }
-  50% { transform: scale(1.1); }
-  100% { opacity: 1; transform: scale(1); }
+  0% { opacity: 0; transform: scale(0.5) translateY(20px); }
+  60% { transform: scale(1.08) translateY(-5px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .winner-reveal {
-  animation: winner-reveal 0.5s ease-out forwards;
+  animation: winner-reveal 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
-@keyframes confetti {
-  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
-  100% { transform: translateY(-100px) rotate(720deg); opacity: 0; }
+@keyframes card-drumroll {
+  0% { opacity: 0.4; transform: scale(0.95); }
+  50% { opacity: 0.7; transform: scale(1.02); }
+  100% { opacity: 0.4; transform: scale(0.95); }
 }
 
-.confetti-particle {
-  animation: confetti 1s ease-out forwards;
+.card-drumroll {
+  animation: card-drumroll 0.12s ease-in-out infinite;
+}
+
+@keyframes card-reveal {
+  0% { transform: scale(0.8) rotateY(90deg); opacity: 0; }
+  50% { transform: scale(1.1) rotateY(0deg); opacity: 1; }
+  100% { transform: scale(1) rotateY(0deg); opacity: 1; }
+}
+
+.card-reveal {
+  animation: card-reveal 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+#confetti-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
 }

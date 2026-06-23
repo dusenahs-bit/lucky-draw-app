@@ -72,9 +72,86 @@ function parseLuckyExcel(data: Uint8Array): Participant[] {
     })
 }
 
+function fireConfetti() {
+  const canvas = document.getElementById('confetti-canvas') as HTMLCanvasElement | null
+  if (!canvas) return
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  canvas.width = window.innerWidth
+  canvas.height = window.innerHeight
+
+  const colors = ['#1a6fb5', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4']
+  const particles: {
+    x: number; y: number; vx: number; vy: number
+    size: number; color: string; rotation: number; vr: number
+    shape: number; life: number
+  }[] = []
+
+  for (let i = 0; i < 150; i++) {
+    particles.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 200,
+      y: canvas.height * 0.4,
+      vx: (Math.random() - 0.5) * 16,
+      vy: -Math.random() * 18 - 4,
+      size: Math.random() * 8 + 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      rotation: Math.random() * 360,
+      vr: (Math.random() - 0.5) * 15,
+      shape: Math.floor(Math.random() * 3),
+      life: 1,
+    })
+  }
+
+  let frame = 0
+  const maxFrames = 120
+
+  function animate() {
+    if (frame >= maxFrames) {
+      ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
+      return
+    }
+    ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
+    particles.forEach((p) => {
+      p.x += p.vx
+      p.vy += 0.4
+      p.y += p.vy
+      p.vx *= 0.98
+      p.rotation += p.vr
+      p.life = Math.max(0, 1 - frame / maxFrames)
+
+      ctx!.save()
+      ctx!.translate(p.x, p.y)
+      ctx!.rotate((p.rotation * Math.PI) / 180)
+      ctx!.globalAlpha = p.life
+      ctx!.fillStyle = p.color
+
+      if (p.shape === 0) {
+        ctx!.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6)
+      } else if (p.shape === 1) {
+        ctx!.beginPath()
+        ctx!.arc(0, 0, p.size / 2, 0, Math.PI * 2)
+        ctx!.fill()
+      } else {
+        ctx!.beginPath()
+        ctx!.moveTo(0, -p.size / 2)
+        ctx!.lineTo(p.size / 2, p.size / 2)
+        ctx!.lineTo(-p.size / 2, p.size / 2)
+        ctx!.closePath()
+        ctx!.fill()
+      }
+      ctx!.restore()
+    })
+    frame++
+    requestAnimationFrame(animate)
+  }
+  animate()
+}
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>('setup')
   const [drawPage, setDrawPage] = useState<DrawPage>('home')
+  const [redrawingIdx, setRedrawingIdx] = useState<number | null>(null)
+  const [redrawingType, setRedrawingType] = useState<'survey' | 'lucky' | null>(null)
 
   // Survey state
   const [surveyParticipants, setSurveyParticipants] = useState<Participant[]>([])
@@ -146,6 +223,7 @@ export default function Home() {
         setPending(shuffle(pool).slice(0, drawCount))
         setDrumNameFn('')
         setDrawing(false)
+        setTimeout(() => fireConfetti(), 100)
       }
     }
     timerRef.current = setInterval(run, 100)
@@ -175,7 +253,23 @@ export default function Home() {
     ])
     const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
     if (pool.length === 0) return
-    setSurveyPending((prev) => prev.map((p, i) => (i === idx ? shuffle(pool)[0] : p)))
+    setRedrawingIdx(idx)
+    setRedrawingType('survey')
+    let tick = 0
+    const total = 15
+    const timer = setInterval(() => {
+      tick++
+      setSurveyPending((prev) => prev.map((p, i) =>
+        i === idx ? { ...shuffle(pool)[0], key: `_temp_${tick}` } : p
+      ))
+      if (tick >= total) {
+        clearInterval(timer)
+        const winner = shuffle(pool)[0]
+        setSurveyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+        setRedrawingIdx(null)
+        setRedrawingType(null)
+      }
+    }, 80)
   }
 
   const handleSurveyRedrawUnconfirmed = () => {
@@ -187,16 +281,37 @@ export default function Home() {
       ...surveyPending.filter((p) => surveyPendingConfirmed.has(p.key)).map((p) => p.key),
     ])
     const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
-    const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-    let newIdx = 0
-    setSurveyPending((prev) =>
-      prev.map((p) => {
-        if (!surveyPendingConfirmed.has(p.key) && newIdx < newWinners.length) {
-          return newWinners[newIdx++]
-        }
-        return p
-      })
-    )
+    setRedrawingIdx(-1)
+    setRedrawingType('survey')
+    let tick = 0
+    const total = 20
+    const timer = setInterval(() => {
+      tick++
+      setSurveyPending((prev) =>
+        prev.map((p) => {
+          if (!surveyPendingConfirmed.has(p.key)) {
+            return { ...shuffle(pool)[0], key: `_temp_${tick}_${Math.random()}` }
+          }
+          return p
+        })
+      )
+      if (tick >= total) {
+        clearInterval(timer)
+        const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+        let newIdx = 0
+        setSurveyPending((prev) =>
+          prev.map((p) => {
+            if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
+              return newWinners[newIdx++]
+            }
+            return p
+          })
+        )
+        setRedrawingIdx(null)
+        setRedrawingType(null)
+        setTimeout(() => fireConfetti(), 100)
+      }
+    }, 80)
   }
 
   const surveyAllConfirmed =
@@ -234,7 +349,23 @@ export default function Home() {
       (p) => !allConfirmedKeys.has(p.key) && !pendingKeys.has(p.key)
     )
     if (pool.length === 0) return
-    setLuckyPending((prev) => prev.map((p, i) => (i === idx ? shuffle(pool)[0] : p)))
+    setRedrawingIdx(idx)
+    setRedrawingType('lucky')
+    let tick = 0
+    const total = 15
+    const timer = setInterval(() => {
+      tick++
+      setLuckyPending((prev) => prev.map((p, i) =>
+        i === idx ? { ...shuffle(pool)[0], key: `_temp_${tick}` } : p
+      ))
+      if (tick >= total) {
+        clearInterval(timer)
+        const winner = shuffle(pool)[0]
+        setLuckyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+        setRedrawingIdx(null)
+        setRedrawingType(null)
+      }
+    }, 80)
   }
 
   const handleLuckyRedrawUnconfirmed = () => {
@@ -246,16 +377,37 @@ export default function Home() {
     const pool = luckyParticipants.filter(
       (p) => !allConfirmedKeys.has(p.key) && !keepKeys.has(p.key)
     )
-    const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-    let newIdx = 0
-    setLuckyPending((prev) =>
-      prev.map((p) => {
-        if (!luckyPendingConfirmed.has(p.key) && newIdx < newWinners.length) {
-          return newWinners[newIdx++]
-        }
-        return p
-      })
-    )
+    setRedrawingIdx(-1)
+    setRedrawingType('lucky')
+    let tick = 0
+    const total = 20
+    const timer = setInterval(() => {
+      tick++
+      setLuckyPending((prev) =>
+        prev.map((p) => {
+          if (!luckyPendingConfirmed.has(p.key)) {
+            return { ...shuffle(pool)[0], key: `_temp_${tick}_${Math.random()}` }
+          }
+          return p
+        })
+      )
+      if (tick >= total) {
+        clearInterval(timer)
+        const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
+        let newIdx = 0
+        setLuckyPending((prev) =>
+          prev.map((p) => {
+            if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
+              return newWinners[newIdx++]
+            }
+            return p
+          })
+        )
+        setRedrawingIdx(null)
+        setRedrawingType(null)
+        setTimeout(() => fireConfetti(), 100)
+      }
+    }, 80)
   }
 
   const luckyAllConfirmed =
@@ -471,25 +623,30 @@ export default function Home() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
                     {surveyPending.map((p, i) => {
                       const isConfirmed = surveyPendingConfirmed.has(p.key)
+                      const isRedrawing = redrawingType === 'survey' && (redrawingIdx === i || redrawingIdx === -1) && !isConfirmed && p.key.startsWith('_temp_')
                       return (
-                        <div key={p.key}
-                          className={`winner-reveal rounded-xl p-4 shadow-lg text-left transition-all ${
-                            isConfirmed
-                              ? 'bg-green-500 text-white'
-                              : 'bg-gradient-to-br from-primary to-primary-dark text-white'
+                        <div key={i}
+                          className={`rounded-xl p-4 shadow-lg text-left transition-all ${
+                            isRedrawing ? 'card-drumroll bg-gray-600 text-white' :
+                            isConfirmed ? 'bg-green-500 text-white' :
+                            'winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white'
                           }`}
-                          style={{ animationDelay: `${i * 0.1}s` }}>
-                          <div className="text-base font-bold">{p.display}</div>
+                          style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
+                          <div className="text-base font-bold">{isRedrawing ? p.drumName : p.display}</div>
                           {isConfirmed ? (
                             <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                          ) : isRedrawing ? (
+                            <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
                           ) : (
                             <div className="flex gap-2 mt-3">
                               <button onClick={() => handleSurveyConfirmOne(p)}
-                                className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full transition-colors">
+                                disabled={redrawingType !== null}
+                                className="text-xs bg-white/20 hover:bg-white/30 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
                                 확인
                               </button>
                               <button onClick={() => handleSurveyRedrawOne(i)}
-                                className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors">
+                                disabled={redrawingType !== null}
+                                className="text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
                                 재추첨
                               </button>
                             </div>
@@ -580,25 +737,30 @@ export default function Home() {
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
                       {luckyPending.map((p, i) => {
                         const isConfirmed = luckyPendingConfirmed.has(p.key)
+                        const isRedrawing = redrawingType === 'lucky' && (redrawingIdx === i || redrawingIdx === -1) && !isConfirmed && p.key.startsWith('_temp_')
                         return (
-                          <div key={p.key}
-                            className={`winner-reveal rounded-xl p-4 shadow-lg transition-all ${
-                              isConfirmed
-                                ? 'bg-green-500 text-white'
-                                : 'bg-gradient-to-br from-primary to-primary-dark text-white'
+                          <div key={i}
+                            className={`rounded-xl p-4 shadow-lg transition-all ${
+                              isRedrawing ? 'card-drumroll bg-gray-600 text-white' :
+                              isConfirmed ? 'bg-green-500 text-white' :
+                              'winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white'
                             }`}
-                            style={{ animationDelay: `${i * 0.1}s` }}>
-                            <div className="text-lg font-bold">{p.display}</div>
+                            style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
+                            <div className="text-lg font-bold">{isRedrawing ? p.drumName : p.display}</div>
                             {isConfirmed ? (
                               <span className="text-xs mt-2 inline-block opacity-80">확인 완료</span>
+                            ) : isRedrawing ? (
+                              <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
                             ) : (
                               <div className="flex gap-2 mt-3">
                                 <button onClick={() => handleLuckyConfirmOne(p)}
-                                  className="text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full transition-colors">
+                                  disabled={redrawingType !== null}
+                                  className="text-xs bg-white/20 hover:bg-white/30 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
                                   확인
                                 </button>
                                 <button onClick={() => handleLuckyRedrawOne(i)}
-                                  className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded-full transition-colors">
+                                  disabled={redrawingType !== null}
+                                  className="text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
                                   재추첨
                                 </button>
                               </div>
@@ -717,6 +879,7 @@ export default function Home() {
       <footer className="mt-auto py-4 text-center text-xs text-gray-400">
         주최: 교육부 | 주관: KRIVET 한국직업능력연구원
       </footer>
+      <canvas id="confetti-canvas" />
     </div>
   )
 }
