@@ -186,7 +186,35 @@ function fireConfetti(durationMs = 2000) {
   animate()
 }
 
+const STORAGE_KEY = 'lucky-draw-state'
+
+interface SavedState {
+  mode: Mode
+  surveyParticipants: Participant[]
+  surveyFileName: string
+  surveyCount: number
+  surveyConfirmed: Participant[]
+  luckyParticipants: Participant[]
+  luckyFileName: string
+  luckyConfirmed: Record<LuckyPrize, Participant[]>
+}
+
+function loadState(): Partial<SavedState> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw)
+  } catch { return {} }
+}
+
+function saveState(state: SavedState) {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch {}
+}
+
 export default function Home() {
+  const [loaded, setLoaded] = useState(false)
   const [mode, setMode] = useState<Mode>('setup')
   const [drawPage, setDrawPage] = useState<DrawPage>('home')
   const [redrawingIdx, setRedrawingIdx] = useState<number | null>(null)
@@ -221,6 +249,53 @@ export default function Home() {
   // Results state
   const [allWinners, setAllWinners] = useState<Winner[]>([])
   const [copied, setCopied] = useState(false)
+
+  // Load saved state on mount
+  useEffect(() => {
+    const saved = loadState()
+    if (saved.mode) setMode(saved.mode)
+    if (saved.surveyParticipants) setSurveyParticipants(saved.surveyParticipants)
+    if (saved.surveyFileName) setSurveyFileName(saved.surveyFileName)
+    if (saved.surveyCount) setSurveyCount(saved.surveyCount)
+    if (saved.surveyConfirmed) setSurveyConfirmed(saved.surveyConfirmed)
+    if (saved.luckyParticipants) setLuckyParticipants(saved.luckyParticipants)
+    if (saved.luckyFileName) setLuckyFileName(saved.luckyFileName)
+    if (saved.luckyConfirmed) setLuckyConfirmed(saved.luckyConfirmed)
+    setLoaded(true)
+  }, [])
+
+  // Save state on changes
+  useEffect(() => {
+    if (!loaded) return
+    saveState({
+      mode,
+      surveyParticipants,
+      surveyFileName,
+      surveyCount,
+      surveyConfirmed,
+      luckyParticipants,
+      luckyFileName,
+      luckyConfirmed,
+    })
+  }, [loaded, mode, surveyParticipants, surveyFileName, surveyCount, surveyConfirmed, luckyParticipants, luckyFileName, luckyConfirmed])
+
+  const handleReset = () => {
+    if (!confirm('모든 데이터를 초기화하시겠습니까?\n(업로드된 명단, 당첨자 기록 모두 삭제됩니다)')) return
+    localStorage.removeItem(STORAGE_KEY)
+    setSurveyParticipants([])
+    setSurveyFileName('')
+    setSurveyCount(10)
+    setSurveyConfirmed([])
+    setSurveyPending([])
+    setSurveyPendingConfirmed(new Set())
+    setLuckyParticipants([])
+    setLuckyFileName('')
+    setLuckyConfirmed({ '논픽션 핸드크림': [], '하이드로 텀블러': [], 'TWG Tea': [] })
+    setLuckyPending([])
+    setLuckyPendingConfirmed(new Set())
+    setMode('setup')
+    setDrawPage('home')
+  }
 
   const getAllLuckyConfirmedKeys = useCallback(() => {
     return new Set(Object.values(luckyConfirmed).flat().map((p) => p.key))
@@ -554,6 +629,12 @@ export default function Home() {
   const canStartDraw = surveyParticipants.length > 0 || luckyParticipants.length > 0
 
   // ==================== SETUP MODE ====================
+  if (!loaded) {
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <p className="text-gray-400">로딩 중...</p>
+    </div>
+  }
+
   if (mode === 'setup') {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -621,6 +702,13 @@ export default function Home() {
             className="w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg">
             {canStartDraw ? '추첨 화면으로 전환' : '명단을 먼저 업로드하세요'}
           </button>
+
+          {(surveyParticipants.length > 0 || luckyParticipants.length > 0 || surveyConfirmed.length > 0) && (
+            <button onClick={handleReset}
+              className="w-full mt-3 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition-colors">
+              전체 초기화
+            </button>
+          )}
         </main>
       </div>
     )
