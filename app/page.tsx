@@ -619,7 +619,7 @@ export default function Home() {
           <div className="text-white/40 text-xs font-medium tracking-widest uppercase mb-0.5">
             2026 KAORN 병원수술간호사회
           </div>
-          <h1 className="text-white font-bold text-base md:text-lg">
+          <h1 className={`text-white font-bold ${drawPage === 'prize' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'}`}>
             제37회 학술대회 및 제12회 Surgical EXPO
           </h1>
           <div
@@ -638,7 +638,7 @@ export default function Home() {
         </button>
       </header>
 
-      <main className="max-w-4xl mx-auto p-4 md:p-6">
+      <main className={drawPage === 'prize' ? 'w-full px-6 md:px-12 py-4 md:py-6' : 'max-w-4xl mx-auto p-4 md:p-6'}>
 
         {/* ===== HOME PAGE ===== */}
         {drawPage === 'home' && (
@@ -708,7 +708,7 @@ export default function Home() {
 
         {/* ===== PRIZE DRAW PAGE ===== */}
         {drawPage === 'prize' && activePrize && (
-          <div className="space-y-5">
+          <div className="space-y-6 flex flex-col min-h-[80vh]">
             <button
               onClick={() => {
                 setDrawPage('home')
@@ -716,29 +716,32 @@ export default function Home() {
                 setPending([])
                 setPendingConfirmed(new Set())
               }}
-              className="text-sm text-white/30 hover:text-white/60 transition-colors"
+              className="text-sm text-white/30 hover:text-white/60 transition-colors self-start"
             >
               ← 목록으로
             </button>
 
             {/* Prize info */}
             <div
-              className="text-center py-7 px-6 rounded-2xl"
+              className="text-center py-10 px-8 rounded-3xl"
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
               <div
-                className="inline-block text-xs font-bold px-3 py-0.5 rounded-full mb-3"
+                className="inline-block text-sm font-bold px-4 py-1 rounded-full mb-5"
                 style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
               >
                 {activePrize.id}번 경품
               </div>
-              <h2 className="text-white font-black text-xl md:text-3xl mb-3 leading-tight">
+              <h2
+                className="text-white font-black leading-snug mb-5"
+                style={{ fontSize: 'clamp(1.4rem, 2.8vw, 2.8rem)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}
+              >
                 {activePrize.name}
               </h2>
-              <p className="text-white/40 text-sm">
-                추첨자: <span className="text-white/70 font-medium">{activePrize.drawer}</span>
+              <p style={{ fontSize: 'clamp(1rem, 1.8vw, 1.4rem)', color: 'rgba(255,255,255,0.45)' }}>
+                추첨자: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>{activePrize.drawer}</span>
               </p>
-              <p className="text-white/30 text-sm mt-1">
+              <p className="mt-2" style={{ fontSize: 'clamp(0.85rem, 1.3vw, 1.1rem)', color: 'rgba(255,255,255,0.3)' }}>
                 {activePrizeConfirmed.length}/{activePrize.count}명 확정
                 {remaining > 0 && ` · 추첨 대상 ${remaining}명`}
               </p>
@@ -746,39 +749,44 @@ export default function Home() {
 
             {/* DRUMROLL phase */}
             {drawPhase === 'drumroll' && (
-              <div className="flex flex-col items-center justify-center py-20">
+              <div className="flex flex-col items-center justify-center flex-1 py-16">
                 <div
-                  className="text-5xl md:text-7xl font-black text-white drumroll-active"
-                  style={{ textShadow: '0 0 50px rgba(251,191,36,0.6), 0 0 100px rgba(99,102,241,0.3)' }}
+                  className="font-black text-white drumroll-active"
+                  style={{
+                    fontSize: 'clamp(3rem, 10vw, 8rem)',
+                    textShadow: '0 0 50px rgba(251,191,36,0.6), 0 0 100px rgba(99,102,241,0.3)',
+                  }}
                 >
                   {drumName || '...'}
                 </div>
-                <p className="text-white/30 mt-6 text-base tracking-widest uppercase text-sm">
-                  추첨 중...
-                </p>
+                <p className="mt-8 text-white/30 tracking-widest text-lg uppercase">추첨 중...</p>
               </div>
             )}
 
             {/* IDLE phase: start button */}
             {drawPhase === 'idle' && pending.length === 0 && (
-              <div className="flex flex-col items-center py-14 gap-4">
+              <div className="flex flex-col items-center flex-1 justify-center gap-6 py-10">
                 {remaining > 0 ? (
                   <button
                     onClick={startDraw}
                     disabled={getPool(activePrizeId).length === 0}
-                    className="text-white text-xl font-black py-7 px-24 rounded-full transition-all disabled:opacity-30 hover:scale-105 active:scale-95"
+                    className="text-white font-black rounded-full transition-all disabled:opacity-30 hover:scale-105 active:scale-95"
                     style={{
+                      fontSize: 'clamp(1.5rem, 3vw, 2.5rem)',
+                      padding: 'clamp(1.5rem, 3vw, 2.2rem) clamp(4rem, 10vw, 10rem)',
                       background: 'linear-gradient(135deg, #1a3a8a, #4c1d95, #1a3a8a)',
-                      boxShadow: '0 0 50px rgba(99,102,241,0.5), 0 0 100px rgba(99,102,241,0.2)',
+                      boxShadow: '0 0 60px rgba(99,102,241,0.5), 0 0 120px rgba(99,102,241,0.2)',
                     }}
                   >
                     추첨 시작
                   </button>
                 ) : (
-                  <div className="text-emerald-400 text-2xl font-bold py-10">🎉 추첨 완료!</div>
+                  <div className="text-emerald-400 font-bold py-10" style={{ fontSize: 'clamp(1.5rem, 3vw, 2.5rem)' }}>
+                    🎉 추첨 완료!
+                  </div>
                 )}
                 {getPool(activePrizeId).length === 0 && remaining > 0 && (
-                  <p className="text-white/30 text-sm">추첨 가능한 인원이 없습니다</p>
+                  <p className="text-white/30 text-lg">추첨 가능한 인원이 없습니다</p>
                 )}
               </div>
             )}
@@ -786,7 +794,7 @@ export default function Home() {
             {/* REVEAL phase: winner cards */}
             {drawPhase === 'reveal' && pending.length > 0 && (
               <div>
-                <h3 className="text-center text-2xl md:text-3xl font-black text-white mb-8">
+                <h3 className="text-center font-black text-white mb-10" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)' }}>
                   🎉 당첨을 축하합니다!
                 </h3>
                 <div
@@ -824,8 +832,8 @@ export default function Home() {
                         }}
                       >
                         <div
-                          className="text-2xl md:text-3xl font-black mb-5"
-                          style={{ color: isConfirmed ? '#6ee7b7' : 'white' }}
+                          className="font-black mb-5"
+                          style={{ fontSize: 'clamp(1.8rem, 4vw, 3.5rem)', color: isConfirmed ? '#6ee7b7' : 'white' }}
                         >
                           {isRedrawing ? p.name : p.display}
                         </div>
@@ -848,16 +856,16 @@ export default function Home() {
                             <button
                               onClick={() => confirmWinner(p)}
                               disabled={redrawingIdx !== null}
-                              className="text-sm font-bold text-white px-6 py-2.5 rounded-full disabled:opacity-30 transition-all hover:scale-105"
-                              style={{ background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.6)' }}
+                              className="font-bold text-white rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                              style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.6)' }}
                             >
                               현장 확인
                             </button>
                             <button
                               onClick={() => startSingleRedraw(i)}
                               disabled={redrawingIdx !== null}
-                              className="text-sm font-bold text-white/60 px-6 py-2.5 rounded-full disabled:opacity-30 transition-all hover:scale-105"
-                              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                              className="font-bold text-white/60 rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                              style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
                             >
                               재추첨
                             </button>
