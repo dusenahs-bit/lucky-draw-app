@@ -351,11 +351,11 @@ export default function Home() {
     const drawCount = Math.min(remaining, pool.length)
     if (drawCount <= 0) { setDrawPhase('idle'); return }
 
-    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal
+    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal + 빵빠래
     const winners = shuffle(pool).slice(0, drawCount)
     setPending(winners)
     setDrawPhase('reveal')
-    setTimeout(() => fireConfetti(2500), 200)
+    setTimeout(() => { fireConfetti(2500); playAudio() }, 200)
   }, [activePrizeId, getPool, remaining])
 
   const confirmWinner = async (p: Participant) => {
@@ -455,6 +455,10 @@ export default function Home() {
     setPending([])
     setPendingConfirmed(new Set())
     setDrawPhase('idle')
+    // 해당 경품 추첨 완료 시 목록으로 이동
+    if (isPrizeDone(activePrizeId)) {
+      setDrawPage('home')
+    }
   }
 
   const handleReset = () => {
@@ -908,7 +912,7 @@ export default function Home() {
                         boxShadow: '0 0 40px rgba(99,102,241,0.4)',
                       }}
                     >
-                      {isPrizeDone(activePrizeId) ? '다음 경품으로 →' : '계속 추첨'}
+                      {isPrizeDone(activePrizeId) ? '다음 추첨으로 →' : '계속 추첨'}
                     </button>
                   ) : (
                     <button
