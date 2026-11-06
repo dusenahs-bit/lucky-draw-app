@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "2026 국가·지역진로교육센터 워크숍 추첨",
-  description: "경품추첨 및 럭키드로우 이벤트",
+  title: "2026 KAORN 병원수술간호사회 경품 추첨",
+  description: "제37회 학술대회 및 제12회 Surgical EXPO 경품 추첨",
 };
 
 export default function RootLayout({

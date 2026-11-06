@@ -2,24 +2,40 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import * as XLSX from 'xlsx'
-import { getSupabase, type Winner } from '../lib/supabase'
+import { getSupabase } from '../lib/supabase'
 
-type Mode = 'setup' | 'draw'
-type DrawPage = 'home' | 'survey' | 'lucky' | 'results'
-type LuckyPrize = '논픽션 핸드크림' | '하이드로 텀블러' | 'TWG Tea'
-
+// ===== TYPES =====
 interface Participant {
   key: string
-  drumName: string
+  name: string
   display: string
 }
 
-const LUCKY_PRIZES: { name: LuckyPrize; count: number }[] = [
-  { name: '논픽션 핸드크림', count: 5 },
-  { name: '하이드로 텀블러', count: 3 },
-  { name: 'TWG Tea', count: 3 },
+interface Prize {
+  id: number
+  name: string
+  count: number
+  drawer: string
+}
+
+type Mode = 'setup' | 'draw'
+type DrawPage = 'home' | 'prize' | 'results'
+type DrawPhase = 'idle' | 'countdown' | 'drumroll' | 'reveal'
+
+// ===== CONSTANTS =====
+const DEFAULT_PRIZES: Prize[] = [
+  { id: 1, name: '루이스폴센 판텔라 160 포터블 램프 V3', count: 2, drawer: '김미희 대구경북 분회장' },
+  { id: 2, name: '보스 QC 울트라 헤드폰', count: 2, drawer: '김현정 호남분회장' },
+  { id: 3, name: '로보락 S8 Pro Plus 로봇청소기', count: 1, drawer: '양귀자 부산경남분회장' },
+  { id: 4, name: '애플 아이패드 에어11(M4 256GB)', count: 1, drawer: '김미형 회장' },
+  { id: 5, name: 'LG 스탠마이미2', count: 1, drawer: '주미자 제2부회장' },
+  { id: 6, name: 'LG전자 시네빔 4K 쇼츠+스탠드', count: 1, drawer: '이윤아 제1부회장' },
+  { id: 7, name: '삼성전자 갤럭시Z폴드8(256GB)', count: 1, drawer: '김미형 회장' },
 ]
 
+const STORAGE_KEY = 'kaorn-draw-2026'
+
+// ===== HELPERS =====
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
   for (let i = a.length - 1; i > 0; i--) {
@@ -30,73 +46,42 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function last4(phone: string): string {
-  const digits = phone.replace(/\D/g, '')
-  return digits.slice(-4)
+  return phone.replace(/\D/g, '').slice(-4)
 }
 
-function parseSurveyExcel(data: Uint8Array): Participant[] {
-  const workbook = XLSX.read(data, { type: 'array' })
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+function parseExcel(data: Uint8Array): Participant[] {
+  const wb = XLSX.read(data, { type: 'array' })
+  const sheet = wb.Sheets[wb.SheetNames[0]]
   const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
   return rows
     .slice(1)
-    .filter((row) => row[2] && String(row[2]).trim())
-    .map((row) => {
-      const type = String(row[0] ?? '').trim()
-      const region = String(row[1] ?? '').trim()
-      const idInfo = String(row[2] ?? '').trim()
-      return { key: idInfo, drumName: idInfo, display: `${type} | ${region} | ${idInfo}` }
-    })
-}
-
-function parseLuckyExcel(data: Uint8Array): Participant[] {
-  const workbook = XLSX.read(data, { type: 'array' })
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-  return rows
-    .slice(1)
-    .filter((row) => row[1] && String(row[1]).trim())
-    .map((row) => {
-      const name = String(row[1] ?? '').trim()
-      const phone = String(row[2] ?? '').trim()
-      const org = String(row[4] ?? '').trim()
-      const phoneLast4 = last4(phone)
-      const parts = [name]
-      if (phoneLast4) parts[0] = `${name} (${phoneLast4})`
-      if (org) parts.push(org)
+    .filter((r) => r[1] && String(r[1]).trim())
+    .map((r) => {
+      const name = String(r[1] ?? '').trim()
+      const phone = String(r[2] ?? '').trim()
+      const p4 = last4(phone)
       return {
-        key: `${name}_${phoneLast4}`,
-        drumName: name,
-        display: parts.join(' · '),
+        key: `${name}_${p4}`,
+        name,
+        display: p4 ? `${name} (${p4})` : name,
       }
     })
 }
 
+// ===== AUDIO =====
 let sfxAudio: HTMLAudioElement | null = null
-
-function preloadSounds() {
-  if (typeof window === 'undefined') return
-  if (!sfxAudio) {
-    sfxAudio = new Audio('/drumroll-fanfare.mp3')
-    sfxAudio.preload = 'auto'
-  }
+function preloadAudio() {
+  if (typeof window === 'undefined' || sfxAudio) return
+  sfxAudio = new Audio('/drumroll-fanfare.mp3')
+  sfxAudio.preload = 'auto'
 }
-
-function playDrumRoll() {
-  preloadSounds()
+function playAudio() {
+  preloadAudio()
   if (!sfxAudio) return
   sfxAudio.currentTime = 0
   sfxAudio.volume = 0.8
   sfxAudio.play().catch(() => {})
 }
-
-function stopDrumRoll() {
-  if (sfxAudio) {
-    sfxAudio.pause()
-    sfxAudio.currentTime = 0
-  }
-}
-
 function stopAudioAt(sec: number) {
   if (!sfxAudio) return
   const check = () => {
@@ -110,73 +95,56 @@ function stopAudioAt(sec: number) {
   requestAnimationFrame(check)
 }
 
-function fireConfetti(durationMs = 2000) {
+// ===== CONFETTI =====
+function fireConfetti(ms = 2500) {
   const canvas = document.getElementById('confetti-canvas') as HTMLCanvasElement | null
   if (!canvas) return
   const ctx = canvas.getContext('2d')
   if (!ctx) return
   canvas.width = window.innerWidth
   canvas.height = window.innerHeight
-
-  const colors = ['#1a6fb5', '#f59e0b', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4']
+  const colors = ['#f59e0b', '#fbbf24', '#ef4444', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#ffffff', '#a78bfa']
   const particles: {
     x: number; y: number; vx: number; vy: number
-    size: number; color: string; rotation: number; vr: number
-    shape: number; life: number
+    size: number; color: string; rotation: number; vr: number; shape: number
   }[] = []
-
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 280; i++) {
     particles.push({
-      x: canvas.width * (0.2 + Math.random() * 0.6),
-      y: canvas.height * (0.2 + Math.random() * 0.3),
-      vx: (Math.random() - 0.5) * 18,
-      vy: -Math.random() * 20 - 5,
-      size: Math.random() * 10 + 4,
+      x: window.innerWidth * (0.1 + Math.random() * 0.8),
+      y: window.innerHeight * (0.05 + Math.random() * 0.4),
+      vx: (Math.random() - 0.5) * 22,
+      vy: -Math.random() * 24 - 5,
+      size: Math.random() * 14 + 4,
       color: colors[Math.floor(Math.random() * colors.length)],
       rotation: Math.random() * 360,
       vr: (Math.random() - 0.5) * 15,
       shape: Math.floor(Math.random() * 3),
-      life: 1,
     })
   }
-
   const fps = 60
-  const maxFrames = Math.floor((durationMs / 1000) * fps)
+  const maxFrames = Math.floor((ms / 1000) * fps)
   let frame = 0
-
   function animate() {
     if (frame >= maxFrames) {
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
       return
     }
     ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
+    const life = Math.max(0, 1 - frame / maxFrames)
     particles.forEach((p) => {
-      p.x += p.vx
-      p.vy += 0.35
-      p.y += p.vy
-      p.vx *= 0.985
-      p.rotation += p.vr
-      p.life = Math.max(0, 1 - frame / maxFrames)
-
+      p.x += p.vx; p.vy += 0.35; p.y += p.vy; p.vx *= 0.985; p.rotation += p.vr
       ctx!.save()
       ctx!.translate(p.x, p.y)
       ctx!.rotate((p.rotation * Math.PI) / 180)
-      ctx!.globalAlpha = p.life
+      ctx!.globalAlpha = life
       ctx!.fillStyle = p.color
-
       if (p.shape === 0) {
         ctx!.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6)
       } else if (p.shape === 1) {
-        ctx!.beginPath()
-        ctx!.arc(0, 0, p.size / 2, 0, Math.PI * 2)
-        ctx!.fill()
+        ctx!.beginPath(); ctx!.arc(0, 0, p.size / 2, 0, Math.PI * 2); ctx!.fill()
       } else {
-        ctx!.beginPath()
-        ctx!.moveTo(0, -p.size / 2)
-        ctx!.lineTo(p.size / 2, p.size / 2)
-        ctx!.lineTo(-p.size / 2, p.size / 2)
-        ctx!.closePath()
-        ctx!.fill()
+        ctx!.beginPath(); ctx!.moveTo(0, -p.size / 2); ctx!.lineTo(p.size / 2, p.size / 2)
+        ctx!.lineTo(-p.size / 2, p.size / 2); ctx!.closePath(); ctx!.fill()
       }
       ctx!.restore()
     })
@@ -186,526 +154,444 @@ function fireConfetti(durationMs = 2000) {
   animate()
 }
 
-const STORAGE_KEY = 'lucky-draw-state'
-
-interface SavedState {
-  mode: Mode
-  surveyParticipants: Participant[]
-  surveyFileName: string
-  surveyCount: number
-  surveyConfirmed: Participant[]
-  luckyParticipants: Participant[]
-  luckyFileName: string
-  luckyConfirmed: Record<LuckyPrize, Participant[]>
+// ===== STATE PERSISTENCE =====
+interface AppState {
+  prizes: Prize[]
+  confirmed: Record<number, Participant[]>
+  participants: Participant[]
+  fileName: string
 }
 
-function loadState(): Partial<SavedState> {
+function loadState(): Partial<AppState> {
   if (typeof window === 'undefined') return {}
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw)
+    return raw ? JSON.parse(raw) : {}
   } catch { return {} }
 }
 
-function saveState(state: SavedState) {
+function saveState(s: AppState) {
   if (typeof window === 'undefined') return
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) } catch {}
 }
 
+// ===== COUNTDOWN OVERLAY =====
+function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
+  const [count, setCount] = useState(5)
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
+
+  useEffect(() => {
+    let alive = true
+    let n = 5
+    const tick = () => {
+      if (!alive) return
+      n--
+      if (n <= 0) {
+        setCount(0)
+        setTimeout(() => { if (alive) onCompleteRef.current() }, 500)
+        return
+      }
+      setCount(n)
+      setTimeout(tick, 1000)
+    }
+    const t = setTimeout(tick, 1000)
+    return () => { alive = false; clearTimeout(t) }
+  }, [])
+
+  const isWarm = count <= 2
+  const numberColor = isWarm ? '#fbbf24' : '#ffffff'
+  const glow = isWarm
+    ? '0 0 40px rgba(251,191,36,1), 0 0 80px rgba(251,191,36,0.6), 0 0 180px rgba(251,191,36,0.3)'
+    : '0 0 40px rgba(255,255,255,0.8), 0 0 80px rgba(255,255,255,0.4)'
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center select-none"
+      style={{ background: 'rgba(5, 10, 40, 0.94)', backdropFilter: 'blur(10px)' }}
+    >
+      {count > 0 && (
+        <div className="relative flex items-center justify-center">
+          {/* Pulse ring */}
+          <div
+            key={`ring-${count}`}
+            className="countdown-ring absolute rounded-full"
+            style={{
+              width: 'clamp(220px, 32vw, 360px)',
+              height: 'clamp(220px, 32vw, 360px)',
+              border: `4px solid ${numberColor}`,
+              opacity: 0.5,
+            }}
+          />
+          {/* Number */}
+          <div
+            key={count}
+            className="countdown-number font-black"
+            style={{
+              fontSize: 'clamp(160px, 24vw, 280px)',
+              lineHeight: 1,
+              color: numberColor,
+              textShadow: glow,
+            }}
+          >
+            {count}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ===== MAIN COMPONENT =====
 export default function Home() {
   const [loaded, setLoaded] = useState(false)
   const [mode, setMode] = useState<Mode>('setup')
   const [drawPage, setDrawPage] = useState<DrawPage>('home')
+  const [activePrizeId, setActivePrizeId] = useState<number>(1)
+
+  // Config state
+  const [prizes, setPrizes] = useState<Prize[]>(DEFAULT_PRIZES)
+  const [participants, setParticipants] = useState<Participant[]>([])
+  const [fileName, setFileName] = useState('')
+  const [confirmed, setConfirmed] = useState<Record<number, Participant[]>>({})
+
+  // Draw state
+  const [drawPhase, setDrawPhase] = useState<DrawPhase>('idle')
+  const [drumName, setDrumName] = useState('')
+  const [pending, setPending] = useState<Participant[]>([])
+  const [pendingConfirmed, setPendingConfirmed] = useState<Set<string>>(new Set())
   const [redrawingIdx, setRedrawingIdx] = useState<number | null>(null)
-  const [redrawingType, setRedrawingType] = useState<'survey' | 'lucky' | null>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Survey state
-  const [surveyParticipants, setSurveyParticipants] = useState<Participant[]>([])
-  const [surveyFileName, setSurveyFileName] = useState('')
-  const [surveyCount, setSurveyCount] = useState(10)
-  const [surveyDrawing, setSurveyDrawing] = useState(false)
-  const [surveyDrumName, setSurveyDrumName] = useState('')
-  const [surveyPending, setSurveyPending] = useState<Participant[]>([])
-  const [surveyPendingConfirmed, setSurveyPendingConfirmed] = useState<Set<string>>(new Set())
-  const [surveyConfirmed, setSurveyConfirmed] = useState<Participant[]>([])
-  const surveyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Lucky draw state
-  const [luckyParticipants, setLuckyParticipants] = useState<Participant[]>([])
-  const [luckyFileName, setLuckyFileName] = useState('')
-  const [luckyPrizeTab, setLuckyPrizeTab] = useState<LuckyPrize>('논픽션 핸드크림')
-  const [luckyDrawing, setLuckyDrawing] = useState(false)
-  const [luckyDrumName, setLuckyDrumName] = useState('')
-  const [luckyPending, setLuckyPending] = useState<Participant[]>([])
-  const [luckyPendingConfirmed, setLuckyPendingConfirmed] = useState<Set<string>>(new Set())
-  const [luckyConfirmed, setLuckyConfirmed] = useState<Record<LuckyPrize, Participant[]>>({
-    '논픽션 핸드크림': [],
-    '하이드로 텀블러': [],
-    'TWG Tea': [],
-  })
-  const luckyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Results state
-  const [allWinners, setAllWinners] = useState<Winner[]>([])
+  // Results
   const [copied, setCopied] = useState(false)
 
-  // Load saved state on mount
+  // Load saved state
   useEffect(() => {
     const saved = loadState()
-    if (saved.mode) setMode(saved.mode)
-    if (saved.surveyParticipants) setSurveyParticipants(saved.surveyParticipants)
-    if (saved.surveyFileName) setSurveyFileName(saved.surveyFileName)
-    if (saved.surveyCount) setSurveyCount(saved.surveyCount)
-    if (saved.surveyConfirmed) setSurveyConfirmed(saved.surveyConfirmed)
-    if (saved.luckyParticipants) setLuckyParticipants(saved.luckyParticipants)
-    if (saved.luckyFileName) setLuckyFileName(saved.luckyFileName)
-    if (saved.luckyConfirmed) setLuckyConfirmed(saved.luckyConfirmed)
+    if (saved.prizes) setPrizes(saved.prizes)
+    if (saved.confirmed) setConfirmed(saved.confirmed)
+    if (saved.participants) setParticipants(saved.participants)
+    if (saved.fileName) setFileName(saved.fileName)
     setLoaded(true)
   }, [])
 
   // Save state on changes
   useEffect(() => {
     if (!loaded) return
-    saveState({
-      mode,
-      surveyParticipants,
-      surveyFileName,
-      surveyCount,
-      surveyConfirmed,
-      luckyParticipants,
-      luckyFileName,
-      luckyConfirmed,
-    })
-  }, [loaded, mode, surveyParticipants, surveyFileName, surveyCount, surveyConfirmed, luckyParticipants, luckyFileName, luckyConfirmed])
+    saveState({ prizes, confirmed, participants, fileName })
+  }, [loaded, prizes, confirmed, participants, fileName])
 
-  const handleReset = () => {
-    if (!confirm('모든 데이터를 초기화하시겠습니까?\n(업로드된 명단, 당첨자 기록 모두 삭제됩니다)')) return
-    localStorage.removeItem(STORAGE_KEY)
-    setSurveyParticipants([])
-    setSurveyFileName('')
-    setSurveyCount(10)
-    setSurveyConfirmed([])
-    setSurveyPending([])
-    setSurveyPendingConfirmed(new Set())
-    setLuckyParticipants([])
-    setLuckyFileName('')
-    setLuckyConfirmed({ '논픽션 핸드크림': [], '하이드로 텀블러': [], 'TWG Tea': [] })
-    setLuckyPending([])
-    setLuckyPendingConfirmed(new Set())
-    setMode('setup')
-    setDrawPage('home')
+  // All confirmed keys across all prizes
+  const allConfirmedKeys = useCallback(() => {
+    return new Set(Object.values(confirmed).flat().map((p) => p.key))
+  }, [confirmed])
+
+  // Pool for a given prize: excludes ALL previously confirmed winners
+  const getPool = useCallback((prizeId: number) => {
+    void prizeId
+    const excludedKeys = allConfirmedKeys()
+    return participants.filter((p) => !excludedKeys.has(p.key))
+  }, [participants, allConfirmedKeys])
+
+  const activePrize = prizes.find((p) => p.id === activePrizeId)
+  const activePrizeConfirmed = confirmed[activePrizeId] ?? []
+  const remaining = (activePrize?.count ?? 0) - activePrizeConfirmed.length
+
+  const isPrizeDone = useCallback((prizeId: number) => {
+    const prize = prizes.find((p) => p.id === prizeId)
+    if (!prize) return false
+    return (confirmed[prizeId]?.length ?? 0) >= prize.count
+  }, [prizes, confirmed])
+
+  // ---- DRAW LOGIC ----
+  const startDraw = () => {
+    const pool = getPool(activePrizeId)
+    if (pool.length === 0 || remaining <= 0) return
+    setPending([])
+    setPendingConfirmed(new Set())
+    setDrawPhase('countdown')
   }
 
-  const getAllLuckyConfirmedKeys = useCallback(() => {
-    return new Set(Object.values(luckyConfirmed).flat().map((p) => p.key))
-  }, [luckyConfirmed])
+  const onCountdownComplete = useCallback(() => {
+    const pool = getPool(activePrizeId)
+    const drawCount = Math.min(remaining, pool.length)
+    if (drawCount <= 0) { setDrawPhase('idle'); return }
 
-  const getSurveyPool = useCallback(() => {
-    const excludedKeys = new Set(surveyConfirmed.map((p) => p.key))
-    return surveyParticipants.filter((p) => !excludedKeys.has(p.key))
-  }, [surveyParticipants, surveyConfirmed])
+    setDrawPhase('drumroll')
+    setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
+    playAudio()
 
-  const getLuckyPool = useCallback(() => {
-    const excludedKeys = getAllLuckyConfirmedKeys()
-    return luckyParticipants.filter((p) => !excludedKeys.has(p.key))
-  }, [luckyParticipants, getAllLuckyConfirmedKeys])
+    timerRef.current = setInterval(() => {
+      setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
+    }, 100)
 
-  const currentPrizeConfig = LUCKY_PRIZES.find((p) => p.name === luckyPrizeTab)!
-  const currentPrizeRemaining = currentPrizeConfig.count - luckyConfirmed[luckyPrizeTab].length
-
-  const startDrumRoll = (
-    pool: Participant[],
-    count: number,
-    setDrumNameFn: (n: string) => void,
-    setDrawing: (b: boolean) => void,
-    setPending: (p: Participant[]) => void,
-    timerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>
-  ) => {
-    if (pool.length === 0) return
-    const drawCount = Math.min(count, pool.length)
-    setDrawing(true)
-    setPending([])
-    setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-    playDrumRoll()
-
-    // Name cycling animation: runs for 5.5s synced with audio
-    const revealAt = 5500
-    const interval = 100
-    let tick = 0
-    const run = () => {
-      tick++
-      setDrumNameFn(pool[Math.floor(Math.random() * pool.length)].drumName)
-    }
-    timerRef.current = setInterval(run, interval)
-
-    // Reveal winners at 5.5s (when fanfare hits in the audio)
     setTimeout(() => {
       if (timerRef.current) clearInterval(timerRef.current)
-      setPending(shuffle(pool).slice(0, drawCount))
-      setDrumNameFn('')
-      setDrawing(false)
-      // Confetti at 6s (0.5s after reveal), lasts 2s (until ~8s)
-      setTimeout(() => fireConfetti(2000), 500)
-      // Audio continues, auto-stop at 10s
-      stopAudioAt(10)
-    }, revealAt)
-  }
-
-  // Survey handlers
-  const handleSurveyDraw = () => {
-    setSurveyPending([])
-    setSurveyPendingConfirmed(new Set())
-    startDrumRoll(getSurveyPool(), surveyCount, setSurveyDrumName, setSurveyDrawing, setSurveyPending, surveyTimerRef)
-  }
-
-  const handleSurveyConfirmOne = async (p: Participant) => {
-    setSurveyConfirmed((prev) => [...prev, p])
-    setSurveyPendingConfirmed((prev) => new Set(prev).add(p.key))
-    await getSupabase().from('winners').insert({
-      name: p.display,
-      prize: '배달의민족 상품권 5만원권',
-      prize_type: 'survey',
-    })
-  }
-
-  const handleSurveyUndoConfirm = async (p: Participant) => {
-    setSurveyConfirmed((prev) => prev.filter((c) => c.key !== p.key))
-    setSurveyPendingConfirmed((prev) => {
-      const next = new Set(prev)
-      next.delete(p.key)
-      return next
-    })
-    await getSupabase().from('winners').delete()
-      .eq('name', p.display)
-      .eq('prize_type', 'survey')
-  }
-
-  const handleSurveyRedrawOne = (idx: number) => {
-    const excludedKeys = new Set([
-      ...surveyConfirmed.map((p) => p.key),
-      ...surveyPending.map((p) => p.key),
-    ])
-    const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
-    if (pool.length === 0) return
-    setRedrawingIdx(idx)
-    setRedrawingType('survey')
-    playDrumRoll()
-    const timer = setInterval(() => {
-      setSurveyPending((prev) => prev.map((p, i) =>
-        i === idx ? { ...shuffle(pool)[0], key: `_temp_${Date.now()}` } : p
-      ))
-    }, 100)
-    setTimeout(() => {
-      clearInterval(timer)
-      const winner = shuffle(pool)[0]
-      setSurveyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
-      setRedrawingIdx(null)
-      setRedrawingType(null)
-      setTimeout(() => fireConfetti(2000), 500)
+      const winners = shuffle(pool).slice(0, drawCount)
+      setPending(winners)
+      setDrumName('')
+      setDrawPhase('reveal')
+      setTimeout(() => fireConfetti(2500), 400)
       stopAudioAt(10)
     }, 5500)
-  }
+  }, [activePrizeId, getPool, remaining])
 
-  const handleSurveyRedrawUnconfirmed = () => {
-    const unconfirmed = surveyPending.filter((p) => !surveyPendingConfirmed.has(p.key))
-    const count = unconfirmed.length
-    if (count === 0) return
-    const excludedKeys = new Set([
-      ...surveyConfirmed.map((p) => p.key),
-      ...surveyPending.filter((p) => surveyPendingConfirmed.has(p.key)).map((p) => p.key),
-    ])
-    const pool = surveyParticipants.filter((p) => !excludedKeys.has(p.key))
-    setRedrawingIdx(-1)
-    setRedrawingType('survey')
-    playDrumRoll()
-    const timer = setInterval(() => {
-      setSurveyPending((prev) =>
-        prev.map((p) => {
-          if (!surveyPendingConfirmed.has(p.key)) {
-            return { ...shuffle(pool)[0], key: `_temp_${Date.now()}_${Math.random()}` }
-          }
-          return p
-        })
-      )
-    }, 100)
-    setTimeout(() => {
-      clearInterval(timer)
-      const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-      let newIdx = 0
-      setSurveyPending((prev) =>
-        prev.map((p) => {
-          if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
-            return newWinners[newIdx++]
-          }
-          return p
-        })
-      )
-      setRedrawingIdx(null)
-      setRedrawingType(null)
-      setTimeout(() => fireConfetti(2000), 500)
-      stopAudioAt(10)
-    }, 5500)
-  }
-
-  const surveyAllConfirmed =
-    surveyPending.length > 0 && surveyPending.every((p) => surveyPendingConfirmed.has(p.key))
-
-  const handleSurveyFinishBatch = () => {
-    setSurveyPending([])
-    setSurveyPendingConfirmed(new Set())
-  }
-
-  // Lucky draw handlers
-  const handleLuckyDraw = () => {
-    setLuckyPending([])
-    setLuckyPendingConfirmed(new Set())
-    startDrumRoll(getLuckyPool(), currentPrizeRemaining, setLuckyDrumName, setLuckyDrawing, setLuckyPending, luckyTimerRef)
-  }
-
-  const handleLuckyConfirmOne = async (p: Participant) => {
-    setLuckyConfirmed((prev) => ({
+  const confirmWinner = async (p: Participant) => {
+    setConfirmed((prev) => ({
       ...prev,
-      [luckyPrizeTab]: [...prev[luckyPrizeTab], p],
+      [activePrizeId]: [...(prev[activePrizeId] ?? []), p],
     }))
-    setLuckyPendingConfirmed((prev) => new Set(prev).add(p.key))
+    setPendingConfirmed((prev) => new Set(prev).add(p.key))
+    if (!activePrize) return
     await getSupabase().from('winners').insert({
       name: p.display,
-      prize: luckyPrizeTab,
+      prize: activePrize.name,
       prize_type: 'lucky',
     })
   }
 
-  const handleLuckyUndoConfirm = async (p: Participant) => {
-    setLuckyConfirmed((prev) => ({
+  const undoConfirm = async (p: Participant) => {
+    setConfirmed((prev) => ({
       ...prev,
-      [luckyPrizeTab]: prev[luckyPrizeTab].filter((c) => c.key !== p.key),
+      [activePrizeId]: (prev[activePrizeId] ?? []).filter((c) => c.key !== p.key),
     }))
-    setLuckyPendingConfirmed((prev) => {
-      const next = new Set(prev)
-      next.delete(p.key)
-      return next
-    })
+    setPendingConfirmed((prev) => { const n = new Set(prev); n.delete(p.key); return n })
+    if (!activePrize) return
     await getSupabase().from('winners').delete()
-      .eq('name', p.display)
-      .eq('prize_type', 'lucky')
+      .eq('name', p.display).eq('prize', activePrize.name)
   }
 
-  const handleLuckyRedrawOne = (idx: number) => {
-    const allConfirmedKeys = getAllLuckyConfirmedKeys()
-    const pendingKeys = new Set(luckyPending.map((p) => p.key))
-    const pool = luckyParticipants.filter(
-      (p) => !allConfirmedKeys.has(p.key) && !pendingKeys.has(p.key)
-    )
+  const startSingleRedraw = (idx: number) => {
+    const excludeKeys = new Set([
+      ...allConfirmedKeys(),
+      ...pending.map((p) => p.key),
+    ])
+    const pool = participants.filter((p) => !excludeKeys.has(p.key))
     if (pool.length === 0) return
     setRedrawingIdx(idx)
-    setRedrawingType('lucky')
-    playDrumRoll()
+    playAudio()
     const timer = setInterval(() => {
-      setLuckyPending((prev) => prev.map((p, i) =>
-        i === idx ? { ...shuffle(pool)[0], key: `_temp_${Date.now()}` } : p
-      ))
+      setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
+      setPending((prev) =>
+        prev.map((p, i) =>
+          i === idx ? { ...shuffle(pool)[0], key: `_tmp_${Date.now()}` } : p
+        )
+      )
     }, 100)
     setTimeout(() => {
       clearInterval(timer)
       const winner = shuffle(pool)[0]
-      setLuckyPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+      setPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
       setRedrawingIdx(null)
-      setRedrawingType(null)
-      setTimeout(() => fireConfetti(2000), 500)
+      setDrumName('')
+      setTimeout(() => fireConfetti(2000), 400)
       stopAudioAt(10)
     }, 5500)
   }
 
-  const handleLuckyRedrawUnconfirmed = () => {
-    const unconfirmed = luckyPending.filter((p) => !luckyPendingConfirmed.has(p.key))
-    const count = unconfirmed.length
-    if (count === 0) return
-    const allConfirmedKeys = getAllLuckyConfirmedKeys()
-    const keepKeys = new Set(luckyPending.filter((p) => luckyPendingConfirmed.has(p.key)).map((p) => p.key))
-    const pool = luckyParticipants.filter(
-      (p) => !allConfirmedKeys.has(p.key) && !keepKeys.has(p.key)
+  const redrawUnconfirmed = () => {
+    const unconfirmed = pending.filter((p) => !pendingConfirmed.has(p.key))
+    if (unconfirmed.length === 0) return
+    const keepKeys = new Set(
+      pending.filter((p) => pendingConfirmed.has(p.key)).map((p) => p.key)
     )
+    const excludeKeys = new Set([...allConfirmedKeys(), ...keepKeys])
+    const pool = participants.filter((p) => !excludeKeys.has(p.key))
     setRedrawingIdx(-1)
-    setRedrawingType('lucky')
-    playDrumRoll()
+    playAudio()
     const timer = setInterval(() => {
-      setLuckyPending((prev) =>
-        prev.map((p) => {
-          if (!luckyPendingConfirmed.has(p.key)) {
-            return { ...shuffle(pool)[0], key: `_temp_${Date.now()}_${Math.random()}` }
-          }
-          return p
-        })
+      setDrumName(pool[Math.floor(Math.random() * pool.length)]?.name ?? '')
+      setPending((prev) =>
+        prev.map((p) =>
+          !pendingConfirmed.has(p.key)
+            ? { ...shuffle(pool)[0], key: `_tmp_${Date.now()}_${Math.random()}` }
+            : p
+        )
       )
     }, 100)
     setTimeout(() => {
       clearInterval(timer)
-      const newWinners = shuffle(pool).slice(0, Math.min(count, pool.length))
-      let newIdx = 0
-      setLuckyPending((prev) =>
+      const newWinners = shuffle(pool).slice(0, Math.min(unconfirmed.length, pool.length))
+      let ni = 0
+      setPending((prev) =>
         prev.map((p) => {
-          if (p.key.startsWith('_temp_') && newIdx < newWinners.length) {
-            return newWinners[newIdx++]
-          }
+          if (p.key.startsWith('_tmp_') && ni < newWinners.length) return newWinners[ni++]
           return p
         })
       )
       setRedrawingIdx(null)
-      setRedrawingType(null)
-      setTimeout(() => fireConfetti(2000), 500)
+      setDrumName('')
+      setTimeout(() => fireConfetti(2000), 400)
       stopAudioAt(10)
     }, 5500)
   }
 
-  const luckyAllConfirmed =
-    luckyPending.length > 0 && luckyPending.every((p) => luckyPendingConfirmed.has(p.key))
+  const allPendingConfirmed =
+    pending.length > 0 && pending.every((p) => pendingConfirmed.has(p.key))
 
-  const handleLuckyFinishBatch = () => {
-    setLuckyPending([])
-    setLuckyPendingConfirmed(new Set())
+  const finishBatch = () => {
+    setPending([])
+    setPendingConfirmed(new Set())
+    setDrawPhase('idle')
   }
 
-  // File upload handlers
-  const handleSurveyFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setSurveyFileName(file.name)
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      setSurveyParticipants(parseSurveyExcel(new Uint8Array(ev.target?.result as ArrayBuffer)))
-    }
-    reader.readAsArrayBuffer(file)
+  const handleReset = () => {
+    if (!confirm('모든 데이터를 초기화하시겠습니까?\n(명단, 당첨 기록 모두 삭제됩니다)')) return
+    localStorage.removeItem(STORAGE_KEY)
+    setPrizes(DEFAULT_PRIZES)
+    setConfirmed({})
+    setParticipants([])
+    setFileName('')
+    setPending([])
+    setPendingConfirmed(new Set())
+    setDrawPhase('idle')
+    setMode('setup')
+    setDrawPage('home')
+    setActivePrizeId(1)
   }
-
-  const handleLuckyFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setLuckyFileName(file.name)
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      setLuckyParticipants(parseLuckyExcel(new Uint8Array(ev.target?.result as ArrayBuffer)))
-    }
-    reader.readAsArrayBuffer(file)
-  }
-
-  // Results
-  const loadResults = async () => {
-    const { data } = await getSupabase()
-      .from('winners')
-      .select('*')
-      .order('confirmed_at', { ascending: true })
-    if (data) setAllWinners(data)
-  }
-
-  useEffect(() => {
-    if (mode === 'draw') preloadSounds()
-  }, [mode])
-
-  useEffect(() => {
-    if (drawPage === 'results') loadResults()
-  }, [drawPage])
 
   const copyResults = () => {
-    const surveyWinners = allWinners.filter((w) => w.prize_type === 'survey')
-    const luckyWinners = allWinners.filter((w) => w.prize_type === 'lucky')
-    let text = '=== 설문조사 경품추첨 당첨자 ===\n'
-    surveyWinners.forEach((w, i) => { text += `${i + 1}. ${w.name}\n` })
-    text += '\n=== 럭키드로우 당첨자 ===\n'
-    const grouped: Record<string, string[]> = {}
-    luckyWinners.forEach((w) => {
-      if (!grouped[w.prize]) grouped[w.prize] = []
-      grouped[w.prize].push(w.name)
-    })
-    Object.entries(grouped).forEach(([prize, names]) => {
-      text += `\n[${prize}]\n`
-      names.forEach((n, i) => { text += `${i + 1}. ${n}\n` })
+    let text = '=== 2026 KAORN 경품 추첨 당첨자 ===\n\n'
+    prizes.forEach((prize) => {
+      const winners = confirmed[prize.id] ?? []
+      text += `[${prize.id}순위] ${prize.name}\n`
+      if (winners.length === 0) {
+        text += '  미추첨\n'
+      } else {
+        winners.forEach((w, i) => { text += `  ${i + 1}. ${w.display}\n` })
+      }
+      text += '\n'
     })
     navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const canStartDraw = surveyParticipants.length > 0 || luckyParticipants.length > 0
+  useEffect(() => {
+    if (mode === 'draw') preloadAudio()
+  }, [mode])
+
+  if (!loaded) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a1628' }}>
+      <p className="text-white/40">로딩 중...</p>
+    </div>
+  )
 
   // ==================== SETUP MODE ====================
-  if (!loaded) {
-    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <p className="text-gray-400">로딩 중...</p>
-    </div>
-  }
-
   if (mode === 'setup') {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-gray-800 text-white py-4 px-4">
-          <h1 className="text-center text-xl font-bold">추첨 관리자 설정</h1>
-          <p className="text-center text-sm mt-1 opacity-75">
-            명단 업로드 후 &quot;추첨 화면으로 전환&quot; 버튼을 누르세요
-          </p>
+      <div className="min-h-screen" style={{ background: '#0a1628' }}>
+        <header className="py-6 px-4 border-b border-white/10">
+          <h1 className="text-center text-xl font-bold text-white">추첨 관리자 설정</h1>
+          <p className="text-center text-sm mt-1 text-white/40">명단 업로드 후 추첨 화면으로 전환하세요</p>
         </header>
-        <main className="max-w-2xl mx-auto p-6 space-y-6">
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-2">1. 설문조사 추첨 명단</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              엑셀 형식: A열(센터유형), B열(지역), C열(아이디+연락처 뒷번호)
-            </p>
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
-                파일 선택
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleSurveyFileUpload} />
-              </label>
-              {surveyFileName && <span className="text-sm text-gray-600">{surveyFileName}</span>}
-            </div>
-            {surveyParticipants.length > 0 && (
-              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <span className="text-sm font-medium text-green-700">{surveyParticipants.length}명 로드 완료</span>
-                <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
-                  {surveyParticipants.map((p, i) => (<div key={i} className="py-0.5">{i + 1}. {p.display}</div>))}
-                </div>
-              </div>
-            )}
-            <div className="mt-4">
-              <label className="text-sm font-medium text-gray-700">추첨 인원</label>
-              <div className="flex items-center gap-3 mt-1">
-                <input type="number" min={1} max={Math.max(1, surveyParticipants.length)} value={surveyCount}
-                  onChange={(e) => setSurveyCount(Number(e.target.value))}
-                  className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                <span className="text-sm text-gray-500">명</span>
-              </div>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-xl shadow-md p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-2">2. 럭키드로우 명단</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              엑셀 형식: B열(이름), C열(연락처) — 당첨 시 이름 + 연락처 뒷4자리 표시
-            </p>
+        <main className="max-w-2xl mx-auto p-6 space-y-5">
+          {/* File upload */}
+          <div
+            className="rounded-2xl p-6"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <h2 className="text-base font-bold text-white mb-1">참가자 명단</h2>
+            <p className="text-sm text-white/40 mb-4">엑셀 형식: B열(이름), C열(연락처)</p>
             <div className="flex items-center gap-3">
-              <label className="text-sm text-white cursor-pointer bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-lg transition-colors font-medium">
+              <label
+                className="cursor-pointer text-sm font-medium text-white px-4 py-2 rounded-lg transition-all hover:opacity-80"
+                style={{ background: 'rgba(59,130,246,0.3)', border: '1px solid rgba(59,130,246,0.5)' }}
+              >
                 파일 선택
-                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleLuckyFileUpload} />
+                <input
+                  type="file" accept=".xlsx,.xls" className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    setFileName(file.name)
+                    const reader = new FileReader()
+                    reader.onload = (ev) =>
+                      setParticipants(parseExcel(new Uint8Array(ev.target?.result as ArrayBuffer)))
+                    reader.readAsArrayBuffer(file)
+                  }}
+                />
               </label>
-              {luckyFileName && <span className="text-sm text-gray-600">{luckyFileName}</span>}
+              {fileName && <span className="text-sm text-white/60">{fileName}</span>}
             </div>
-            {luckyParticipants.length > 0 && (
-              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <span className="text-sm font-medium text-green-700">{luckyParticipants.length}명 로드 완료</span>
-                <div className="mt-2 max-h-40 overflow-y-auto text-xs text-gray-600 space-y-1">
-                  {luckyParticipants.map((p, i) => (<div key={i} className="py-0.5">{i + 1}. {p.display}</div>))}
+            {participants.length > 0 && (
+              <div
+                className="mt-4 p-3 rounded-lg"
+                style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)' }}
+              >
+                <span className="text-sm font-medium text-emerald-400">{participants.length}명 로드 완료</span>
+                <div className="mt-2 max-h-36 overflow-y-auto text-xs text-white/50 space-y-1">
+                  {participants.map((p, i) => (
+                    <div key={i}>{i + 1}. {p.display}</div>
+                  ))}
                 </div>
               </div>
             )}
           </div>
 
-          <button onClick={() => { setMode('draw'); setDrawPage('home') }} disabled={!canStartDraw}
-            className="w-full bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-lg font-bold py-4 rounded-xl transition-colors shadow-lg">
-            {canStartDraw ? '추첨 화면으로 전환' : '명단을 먼저 업로드하세요'}
+          {/* Prize config */}
+          <div
+            className="rounded-2xl p-6"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <h2 className="text-base font-bold text-white mb-4">경품 목록 설정</h2>
+            <div className="space-y-2">
+              {prizes.map((prize, idx) => (
+                <div
+                  key={prize.id}
+                  className="flex items-center gap-2 p-3 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                >
+                  <span className="text-white/30 text-xs w-5 shrink-0 text-center">{idx + 1}</span>
+                  <span className="text-white text-sm flex-1 min-w-0 truncate">{prize.name}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-white/30 text-xs">수량</span>
+                    <input
+                      type="number" min={1} max={20} value={prize.count}
+                      onChange={(e) =>
+                        setPrizes((prev) =>
+                          prev.map((p) => p.id === prize.id ? { ...p, count: Number(e.target.value) } : p)
+                        )
+                      }
+                      className="w-14 text-center text-sm text-white rounded-lg px-2 py-1 outline-none"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-white/30 text-xs">추첨자</span>
+                    <input
+                      type="text" value={prize.drawer}
+                      onChange={(e) =>
+                        setPrizes((prev) =>
+                          prev.map((p) => p.id === prize.id ? { ...p, drawer: e.target.value } : p)
+                        )
+                      }
+                      className="w-36 text-sm text-white rounded-lg px-2 py-1 outline-none"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={() => { setMode('draw'); setDrawPage('home') }}
+            disabled={participants.length === 0}
+            className="w-full text-white text-lg font-bold py-4 rounded-2xl transition-all disabled:opacity-30 hover:opacity-90"
+            style={{ background: 'linear-gradient(135deg, #1a4fa0, #2563eb)' }}
+          >
+            {participants.length > 0 ? '추첨 화면으로 전환' : '명단을 먼저 업로드하세요'}
           </button>
 
-          {(surveyParticipants.length > 0 || luckyParticipants.length > 0 || surveyConfirmed.length > 0) && (
-            <button onClick={handleReset}
-              className="w-full mt-3 bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition-colors">
+          {(participants.length > 0 || Object.keys(confirmed).length > 0) && (
+            <button
+              onClick={handleReset}
+              className="w-full text-white font-bold py-3 rounded-2xl transition-all hover:opacity-80"
+              style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)' }}
+            >
               전체 초기화
             </button>
           )}
@@ -715,140 +601,315 @@ export default function Home() {
   }
 
   // ==================== DRAW MODE ====================
+  const bg = 'linear-gradient(180deg, #060e22 0%, #0a1628 40%, #0d1b3e 70%, #0a1628 100%)'
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#e8f4fd] to-white">
-      <header className="bg-primary text-white py-5 px-4 shadow-lg relative">
-        <h1 className="text-center text-2xl md:text-3xl font-bold">경품추첨</h1>
-        <button onClick={() => setMode('setup')}
-          className="absolute top-5 right-4 bg-white/20 hover:bg-white/40 text-white text-sm px-3 py-1 rounded-lg transition-colors" title="관리자 설정">
+    <div className="min-h-screen" style={{ background: bg }}>
+      {/* Countdown overlay */}
+      {drawPhase === 'countdown' && (
+        <CountdownOverlay onComplete={onCountdownComplete} />
+      )}
+
+      {/* Header */}
+      <header
+        className="py-4 px-4 relative"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        <div className="text-center">
+          <div className="text-white/40 text-xs font-medium tracking-widest uppercase mb-0.5">
+            2026 KAORN 병원수술간호사회
+          </div>
+          <h1 className="text-white font-bold text-base md:text-lg">
+            제37회 학술대회 및 제12회 Surgical EXPO
+          </h1>
+          <div
+            className="inline-block mt-1.5 text-xs font-bold px-3 py-0.5 rounded-full"
+            style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}
+          >
+            경품 추첨
+          </div>
+        </div>
+        <button
+          onClick={() => setMode('setup')}
+          className="absolute top-4 right-4 text-xs text-white/30 hover:text-white/70 px-3 py-1.5 rounded-lg transition-colors"
+          style={{ background: 'rgba(255,255,255,0.06)' }}
+        >
           관리자
         </button>
       </header>
 
-      <main className="max-w-5xl mx-auto p-4 md:p-6">
-        {/* HOME: Draw selection */}
+      <main className="max-w-4xl mx-auto p-4 md:p-6">
+
+        {/* ===== HOME PAGE ===== */}
         {drawPage === 'home' && (
-          <div className="space-y-4 mt-8">
-            <button onClick={() => setDrawPage('survey')}
-              className="w-full bg-white hover:bg-primary-light rounded-2xl shadow-lg p-8 text-left transition-colors group">
-              <h2 className="text-2xl font-bold text-primary group-hover:text-primary-dark">설문조사 경품추첨</h2>
-              <p className="text-gray-500 mt-2">배달의민족 상품권 5만원권 · {surveyCount}명</p>
-              {surveyConfirmed.length > 0 && (
-                <p className="text-sm text-green-600 mt-1">확정 {surveyConfirmed.length}명</p>
-              )}
-            </button>
-            <button onClick={() => setDrawPage('lucky')}
-              className="w-full bg-white hover:bg-primary-light rounded-2xl shadow-lg p-8 text-left transition-colors group">
-              <h2 className="text-2xl font-bold text-primary group-hover:text-primary-dark">럭키드로우</h2>
-              <p className="text-gray-500 mt-2">논픽션 핸드크림 5명 · 하이드로 텀블러 3명 · TWG Tea 3명</p>
-              {Object.values(luckyConfirmed).flat().length > 0 && (
-                <p className="text-sm text-green-600 mt-1">확정 {Object.values(luckyConfirmed).flat().length}명</p>
-              )}
-            </button>
-            <button onClick={() => setDrawPage('results')}
-              className="w-full bg-white hover:bg-gray-50 rounded-2xl shadow-lg p-8 text-left transition-colors group">
-              <h2 className="text-2xl font-bold text-gray-600 group-hover:text-gray-800">최종 결과</h2>
-              <p className="text-gray-400 mt-2">전체 당첨자 조회 및 복사</p>
+          <div className="space-y-3 mt-4">
+            <p className="text-white/30 text-sm text-center mb-5">추첨할 경품을 선택하세요</p>
+            {prizes.map((prize, idx) => {
+              const done = isPrizeDone(prize.id)
+              const confirmedCount = confirmed[prize.id]?.length ?? 0
+              return (
+                <button
+                  key={prize.id}
+                  onClick={() => {
+                    setActivePrizeId(prize.id)
+                    setDrawPage('prize')
+                    setDrawPhase('idle')
+                    setPending([])
+                    setPendingConfirmed(new Set())
+                  }}
+                  className="w-full text-left p-5 rounded-2xl transition-all group hover:scale-[1.01]"
+                  style={{
+                    background: done
+                      ? 'rgba(16,185,129,0.08)'
+                      : 'rgba(255,255,255,0.04)',
+                    border: done
+                      ? '1px solid rgba(16,185,129,0.3)'
+                      : '1px solid rgba(255,255,255,0.08)',
+                  }}
+                >
+                  <div className="flex items-center gap-4">
+                    <span
+                      className="text-2xl md:text-3xl font-black shrink-0 tabular-nums"
+                      style={{ color: done ? 'rgba(52,211,153,0.6)' : 'rgba(255,255,255,0.15)' }}
+                    >
+                      {String(idx + 1).padStart(2, '0')}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className="font-bold text-base md:text-lg leading-tight"
+                        style={{ color: done ? '#6ee7b7' : 'white' }}
+                      >
+                        {prize.name}
+                      </div>
+                      <div className="text-sm mt-1 flex items-center gap-3">
+                        <span className="text-white/30">추첨: {prize.drawer}</span>
+                        <span style={{ color: done ? '#6ee7b7' : 'rgba(255,255,255,0.3)' }}>
+                          {confirmedCount}/{prize.count}명
+                        </span>
+                      </div>
+                    </div>
+                    {done
+                      ? <span className="text-emerald-400 text-sm font-bold shrink-0">완료 ✓</span>
+                      : <span className="text-white/20 group-hover:text-white/50 transition-colors shrink-0 text-lg">›</span>
+                    }
+                  </div>
+                </button>
+              )
+            })}
+            <button
+              onClick={() => setDrawPage('results')}
+              className="w-full p-4 rounded-2xl text-white/30 hover:text-white/60 transition-all text-sm mt-2"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              최종 결과 보기
             </button>
           </div>
         )}
 
-        {/* SURVEY DRAW */}
-        {drawPage === 'survey' && (
-          <div className="space-y-6">
-            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
-              ← 돌아가기
+        {/* ===== PRIZE DRAW PAGE ===== */}
+        {drawPage === 'prize' && activePrize && (
+          <div className="space-y-5">
+            <button
+              onClick={() => {
+                setDrawPage('home')
+                setDrawPhase('idle')
+                setPending([])
+                setPendingConfirmed(new Set())
+              }}
+              className="text-sm text-white/30 hover:text-white/60 transition-colors"
+            >
+              ← 목록으로
             </button>
 
-            <div className="bg-white rounded-xl shadow-md p-6 text-center min-h-[350px] flex flex-col items-center justify-center">
-              {surveyDrawing && (
-                <div>
-                  <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
-                    {surveyDrumName || '...'}
-                  </div>
-                  <p className="text-gray-500 mt-2 text-lg">추첨 중...</p>
-                </div>
-              )}
-
-              {!surveyDrawing && surveyPending.length === 0 && (
-                <div>
-                  <h2 className="text-primary font-bold text-2xl mb-8">
-                    배달의민족 상품권 5만원권
-                  </h2>
-                  <button onClick={handleSurveyDraw} disabled={getSurveyPool().length === 0}
-                    className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl">
-                    추첨 시작 ({surveyCount}명)
-                  </button>
-                </div>
-              )}
-
-              {!surveyDrawing && surveyPending.length > 0 && (
-                <div className="w-full">
-                  <h3 className="text-2xl font-bold text-gray-700 mb-6">당첨을 축하합니다!</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">
-                    {surveyPending.map((p, i) => {
-                      const isConfirmed = surveyPendingConfirmed.has(p.key)
-                      const isRedrawing = redrawingType === 'survey' && (redrawingIdx === i || redrawingIdx === -1) && !isConfirmed && p.key.startsWith('_temp_')
-                      return (
-                        <div key={i}
-                          className={`rounded-xl p-4 shadow-lg text-left transition-all ${
-                            isRedrawing ? 'card-drumroll bg-gray-600 text-white' :
-                            isConfirmed ? 'bg-green-500 text-white' :
-                            'winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white'
-                          }`}
-                          style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
-                          <div className="text-base font-bold">{isRedrawing ? p.drumName : p.display}</div>
-                          {isConfirmed ? (
-                            <div className="flex gap-2 mt-3 items-center">
-                              <span className="text-xs opacity-80">확인 완료</span>
-                              <button onClick={() => handleSurveyUndoConfirm(p)}
-                                className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors">
-                                취소
-                              </button>
-                            </div>
-                          ) : isRedrawing ? (
-                            <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
-                          ) : (
-                            <div className="flex gap-2 mt-3">
-                              <button onClick={() => handleSurveyConfirmOne(p)}
-                                disabled={redrawingType !== null}
-                                className="text-xs bg-white/20 hover:bg-white/30 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
-                                확인
-                              </button>
-                              <button onClick={() => handleSurveyRedrawOne(i)}
-                                disabled={redrawingType !== null}
-                                className="text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
-                                재추첨
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <div className="flex gap-3 justify-center">
-                    {surveyAllConfirmed ? (
-                      <button onClick={handleSurveyFinishBatch}
-                        className="bg-primary hover:bg-primary-dark text-white font-bold py-3 px-8 rounded-full transition-colors text-lg">
-                        다음 추첨
-                      </button>
-                    ) : (
-                      <button onClick={handleSurveyRedrawUnconfirmed}
-                        className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors">
-                        미확인자 재추첨 ({surveyPending.filter((p) => !surveyPendingConfirmed.has(p.key)).length}명)
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
+            {/* Prize info */}
+            <div
+              className="text-center py-7 px-6 rounded-2xl"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <div
+                className="inline-block text-xs font-bold px-3 py-0.5 rounded-full mb-3"
+                style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
+              >
+                {activePrize.id}번 경품
+              </div>
+              <h2 className="text-white font-black text-xl md:text-3xl mb-3 leading-tight">
+                {activePrize.name}
+              </h2>
+              <p className="text-white/40 text-sm">
+                추첨자: <span className="text-white/70 font-medium">{activePrize.drawer}</span>
+              </p>
+              <p className="text-white/30 text-sm mt-1">
+                {activePrizeConfirmed.length}/{activePrize.count}명 확정
+                {remaining > 0 && ` · 추첨 대상 ${remaining}명`}
+              </p>
             </div>
 
-            {surveyConfirmed.length > 0 && (
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-lg font-bold text-primary mb-4">확정 당첨자 ({surveyConfirmed.length}명)</h2>
+            {/* DRUMROLL phase */}
+            {drawPhase === 'drumroll' && (
+              <div className="flex flex-col items-center justify-center py-20">
+                <div
+                  className="text-5xl md:text-7xl font-black text-white drumroll-active"
+                  style={{ textShadow: '0 0 50px rgba(251,191,36,0.6), 0 0 100px rgba(99,102,241,0.3)' }}
+                >
+                  {drumName || '...'}
+                </div>
+                <p className="text-white/30 mt-6 text-base tracking-widest uppercase text-sm">
+                  추첨 중...
+                </p>
+              </div>
+            )}
+
+            {/* IDLE phase: start button */}
+            {drawPhase === 'idle' && pending.length === 0 && (
+              <div className="flex flex-col items-center py-14 gap-4">
+                {remaining > 0 ? (
+                  <button
+                    onClick={startDraw}
+                    disabled={getPool(activePrizeId).length === 0}
+                    className="text-white text-xl font-black py-7 px-24 rounded-full transition-all disabled:opacity-30 hover:scale-105 active:scale-95"
+                    style={{
+                      background: 'linear-gradient(135deg, #1a3a8a, #4c1d95, #1a3a8a)',
+                      boxShadow: '0 0 50px rgba(99,102,241,0.5), 0 0 100px rgba(99,102,241,0.2)',
+                    }}
+                  >
+                    추첨 시작
+                  </button>
+                ) : (
+                  <div className="text-emerald-400 text-2xl font-bold py-10">🎉 추첨 완료!</div>
+                )}
+                {getPool(activePrizeId).length === 0 && remaining > 0 && (
+                  <p className="text-white/30 text-sm">추첨 가능한 인원이 없습니다</p>
+                )}
+              </div>
+            )}
+
+            {/* REVEAL phase: winner cards */}
+            {drawPhase === 'reveal' && pending.length > 0 && (
+              <div>
+                <h3 className="text-center text-2xl md:text-3xl font-black text-white mb-8">
+                  🎉 당첨을 축하합니다!
+                </h3>
+                <div
+                  className={`grid gap-5 mb-8 ${
+                    pending.length === 1 ? 'grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2'
+                  }`}
+                >
+                  {pending.map((p, i) => {
+                    const isConfirmed = pendingConfirmed.has(p.key)
+                    const isTmp = p.key.startsWith('_tmp_')
+                    const isRedrawing =
+                      (redrawingIdx === i || (redrawingIdx === -1 && !isConfirmed && isTmp))
+
+                    return (
+                      <div
+                        key={i}
+                        className={`rounded-2xl p-7 text-center ${
+                          isRedrawing ? 'card-drumroll' : isConfirmed ? '' : 'winner-reveal'
+                        }`}
+                        style={{
+                          background: isRedrawing
+                            ? 'rgba(99,102,241,0.2)'
+                            : isConfirmed
+                            ? 'rgba(16,185,129,0.15)'
+                            : 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(124,58,237,0.3))',
+                          border: isRedrawing
+                            ? '1px solid rgba(99,102,241,0.4)'
+                            : isConfirmed
+                            ? '1px solid rgba(16,185,129,0.4)'
+                            : '1px solid rgba(139,92,246,0.4)',
+                          animationDelay: `${i * 0.15}s`,
+                          boxShadow: isConfirmed
+                            ? 'none'
+                            : '0 0 40px rgba(99,102,241,0.15)',
+                        }}
+                      >
+                        <div
+                          className="text-2xl md:text-3xl font-black mb-5"
+                          style={{ color: isConfirmed ? '#6ee7b7' : 'white' }}
+                        >
+                          {isRedrawing ? p.name : p.display}
+                        </div>
+
+                        {isConfirmed ? (
+                          <div className="flex items-center justify-center gap-3">
+                            <span className="text-emerald-400 text-sm font-bold">현장 확인 완료 ✓</span>
+                            <button
+                              onClick={() => undoConfirm(p)}
+                              className="text-xs text-white/30 hover:text-white/60 px-3 py-1 rounded-full transition-colors"
+                              style={{ background: 'rgba(255,255,255,0.08)' }}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : isRedrawing ? (
+                          <p className="text-white/30 text-sm">재추첨 중...</p>
+                        ) : (
+                          <div className="flex gap-3 justify-center">
+                            <button
+                              onClick={() => confirmWinner(p)}
+                              disabled={redrawingIdx !== null}
+                              className="text-sm font-bold text-white px-6 py-2.5 rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                              style={{ background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.6)' }}
+                            >
+                              현장 확인
+                            </button>
+                            <button
+                              onClick={() => startSingleRedraw(i)}
+                              disabled={redrawingIdx !== null}
+                              className="text-sm font-bold text-white/60 px-6 py-2.5 rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                            >
+                              재추첨
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="flex justify-center">
+                  {allPendingConfirmed ? (
+                    <button
+                      onClick={finishBatch}
+                      className="text-white font-black py-5 px-16 rounded-full transition-all hover:scale-105 text-lg"
+                      style={{
+                        background: 'linear-gradient(135deg, #1a3a8a, #4c1d95)',
+                        boxShadow: '0 0 40px rgba(99,102,241,0.4)',
+                      }}
+                    >
+                      {isPrizeDone(activePrizeId) ? '다음 경품으로 →' : '계속 추첨'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={redrawUnconfirmed}
+                      disabled={redrawingIdx !== null}
+                      className="text-white font-bold py-4 px-10 rounded-full disabled:opacity-30 transition-all"
+                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                    >
+                      미확인자 재추첨 ({pending.filter((p) => !pendingConfirmed.has(p.key)).length}명)
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Confirmed winners for this prize */}
+            {activePrizeConfirmed.length > 0 && (
+              <div
+                className="rounded-xl p-5"
+                style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.15)' }}
+              >
+                <h3 className="text-emerald-400 font-bold mb-3 text-sm">
+                  확정 당첨자 ({activePrizeConfirmed.length}/{activePrize.count}명)
+                </h3>
                 <div className="space-y-2">
-                  {surveyConfirmed.map((p, i) => (
-                    <div key={i} className="bg-primary-light text-primary rounded-lg p-3 text-sm font-medium">
+                  {activePrizeConfirmed.map((p, i) => (
+                    <div
+                      key={i}
+                      className="text-white/70 text-sm py-2 px-3 rounded-lg"
+                      style={{ background: 'rgba(255,255,255,0.04)' }}
+                    >
                       {i + 1}. {p.display}
                     </div>
                   ))}
@@ -858,204 +919,72 @@ export default function Home() {
           </div>
         )}
 
-        {/* LUCKY DRAW */}
-        {drawPage === 'lucky' && (
-          <div className="space-y-6">
-            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
+        {/* ===== RESULTS PAGE ===== */}
+        {drawPage === 'results' && (
+          <div className="space-y-5">
+            <button
+              onClick={() => setDrawPage('home')}
+              className="text-sm text-white/30 hover:text-white/60 transition-colors"
+            >
               ← 돌아가기
             </button>
-
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="flex border-b">
-                {LUCKY_PRIZES.map((prize) => (
-                  <button key={prize.name}
-                    onClick={() => { setLuckyPrizeTab(prize.name); setLuckyPending([]); setLuckyPendingConfirmed(new Set()) }}
-                    className={`flex-1 py-3 px-2 text-sm font-medium transition-colors ${
-                      luckyPrizeTab === prize.name
-                        ? 'text-primary border-b-2 border-primary bg-primary-light/50'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}>
-                    {prize.name}<br />
-                    <span className="text-xs">({luckyConfirmed[prize.name].length}/{prize.count}명)</span>
-                  </button>
-                ))}
+            <div
+              className="rounded-2xl p-6"
+              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-white font-bold text-lg">전체 당첨자 목록</h2>
+                <button
+                  onClick={copyResults}
+                  className="text-sm px-4 py-2 rounded-lg transition-colors font-medium"
+                  style={{
+                    background: copied ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.08)',
+                    color: copied ? '#6ee7b7' : 'white',
+                    border: copied ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {copied ? '복사됨 ✓' : '결과 복사'}
+                </button>
               </div>
-
-              <div className="p-6 text-center min-h-[350px] flex flex-col items-center justify-center">
-                {luckyDrawing && (
-                  <div>
-                    <div className="text-4xl md:text-6xl font-bold text-primary drumroll-active py-8">
-                      {luckyDrumName || '...'}
-                    </div>
-                    <p className="text-gray-500 mt-2 text-lg">추첨 중...</p>
-                  </div>
-                )}
-
-                {!luckyDrawing && luckyPending.length === 0 && (
-                  <div>
-                    <h2 className="text-primary font-bold text-2xl mb-8">{luckyPrizeTab}</h2>
-                    <button onClick={handleLuckyDraw}
-                      disabled={currentPrizeRemaining <= 0 || getLuckyPool().length === 0}
-                      className="bg-primary hover:bg-primary-dark disabled:bg-gray-300 text-white text-xl font-bold py-5 px-16 rounded-full transition-colors shadow-lg hover:shadow-xl">
-                      {currentPrizeRemaining <= 0 ? '추첨 완료' : `추첨 시작 (${currentPrizeRemaining}명)`}
-                    </button>
-                  </div>
-                )}
-
-                {!luckyDrawing && luckyPending.length > 0 && (
-                  <div className="w-full">
-                    <h3 className="text-2xl font-bold text-gray-700 mb-6">{luckyPrizeTab} 당첨!</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
-                      {luckyPending.map((p, i) => {
-                        const isConfirmed = luckyPendingConfirmed.has(p.key)
-                        const isRedrawing = redrawingType === 'lucky' && (redrawingIdx === i || redrawingIdx === -1) && !isConfirmed && p.key.startsWith('_temp_')
-                        return (
-                          <div key={i}
-                            className={`rounded-xl p-4 shadow-lg transition-all ${
-                              isRedrawing ? 'card-drumroll bg-gray-600 text-white' :
-                              isConfirmed ? 'bg-green-500 text-white' :
-                              'winner-reveal bg-gradient-to-br from-primary to-primary-dark text-white'
-                            }`}
-                            style={!isRedrawing && !isConfirmed ? { animationDelay: `${i * 0.1}s` } : undefined}>
-                            <div className="text-lg font-bold">{isRedrawing ? p.drumName : p.display}</div>
-                            {isConfirmed ? (
-                              <div className="flex gap-2 mt-3 items-center">
-                                <span className="text-xs opacity-80">확인 완료</span>
-                                <button onClick={() => handleLuckyUndoConfirm(p)}
-                                  className="text-xs bg-white/20 hover:bg-white/30 px-2 py-0.5 rounded-full transition-colors">
-                                  취소
-                                </button>
-                              </div>
-                            ) : isRedrawing ? (
-                              <span className="text-xs mt-2 inline-block opacity-60">재추첨 중...</span>
-                            ) : (
-                              <div className="flex gap-2 mt-3">
-                                <button onClick={() => handleLuckyConfirmOne(p)}
-                                  disabled={redrawingType !== null}
-                                  className="text-xs bg-white/20 hover:bg-white/30 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
-                                  확인
-                                </button>
-                                <button onClick={() => handleLuckyRedrawOne(i)}
-                                  disabled={redrawingType !== null}
-                                  className="text-xs bg-white/10 hover:bg-white/20 disabled:opacity-50 px-3 py-1 rounded-full transition-colors">
-                                  재추첨
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <div className="flex gap-3 justify-center">
-                      {luckyAllConfirmed ? (
-                        <button onClick={handleLuckyFinishBatch}
-                          className="bg-primary hover:bg-primary-dark text-white font-bold py-3 px-8 rounded-full transition-colors text-lg">
-                          다음 추첨
-                        </button>
+              <div className="space-y-6">
+                {prizes.map((prize) => {
+                  const winners = confirmed[prize.id] ?? []
+                  return (
+                    <div key={prize.id}>
+                      <div
+                        className="flex items-center gap-2 mb-3 pb-2"
+                        style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+                      >
+                        <span className="text-white/30 text-sm font-bold">{prize.id}.</span>
+                        <span className="text-white/70 text-sm font-bold">{prize.name}</span>
+                        <span className="text-white/30 text-xs ml-auto">
+                          {winners.length}/{prize.count}명
+                        </span>
+                      </div>
+                      {winners.length === 0 ? (
+                        <p className="text-white/20 text-sm px-1">미추첨</p>
                       ) : (
-                        <button onClick={handleLuckyRedrawUnconfirmed}
-                          className="bg-gray-400 hover:bg-gray-500 text-white font-bold py-3 px-8 rounded-full transition-colors">
-                          미확인자 재추첨 ({luckyPending.filter((p) => !luckyPendingConfirmed.has(p.key)).length}명)
-                        </button>
+                        <div className="space-y-1">
+                          {winners.map((w, i) => (
+                            <div
+                              key={i}
+                              className="text-white/80 text-sm py-2 px-3 rounded-lg"
+                              style={{ background: 'rgba(255,255,255,0.04)' }}
+                            >
+                              {i + 1}. {w.display}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {Object.values(luckyConfirmed).flat().length > 0 && (
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-lg font-bold text-primary mb-4">럭키드로우 당첨자</h2>
-                {LUCKY_PRIZES.map((prize) =>
-                  luckyConfirmed[prize.name].length > 0 && (
-                    <div key={prize.name} className="mb-4 last:mb-0">
-                      <h3 className="text-sm font-bold text-gray-600 mb-2">
-                        {prize.name} ({luckyConfirmed[prize.name].length}/{prize.count}명)
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {luckyConfirmed[prize.name].map((p, i) => (
-                          <div key={i} className="bg-primary-light text-primary rounded-lg p-2 text-center text-sm font-medium">
-                            {i + 1}. {p.display}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   )
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* RESULTS */}
-        {drawPage === 'results' && (
-          <div className="space-y-6">
-            <button onClick={() => setDrawPage('home')} className="text-sm text-gray-400 hover:text-gray-600">
-              ← 돌아가기
-            </button>
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-primary">전체 당첨자 목록</h2>
-                <div className="flex gap-2">
-                  <button onClick={loadResults} className="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition-colors">
-                    새로고침
-                  </button>
-                  <button onClick={copyResults}
-                    className={`text-sm px-3 py-2 rounded-lg transition-colors ${
-                      copied ? 'bg-green-100 text-green-700' : 'bg-primary text-white hover:bg-primary-dark'
-                    }`}>
-                    {copied ? '복사됨!' : '결과 복사'}
-                  </button>
-                </div>
-              </div>
-              <div className="mb-6">
-                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">설문조사 경품추첨</h3>
-                {allWinners.filter((w) => w.prize_type === 'survey').length === 0 ? (
-                  <p className="text-gray-400 text-sm">아직 당첨자가 없습니다.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {allWinners.filter((w) => w.prize_type === 'survey').map((w, i) => (
-                      <div key={w.id} className="bg-primary-light text-primary rounded-lg p-3 text-sm">
-                        <div className="font-bold">{i + 1}. {w.name}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-gray-700 mb-3 pb-2 border-b">럭키드로우</h3>
-                {allWinners.filter((w) => w.prize_type === 'lucky').length === 0 ? (
-                  <p className="text-gray-400 text-sm">아직 당첨자가 없습니다.</p>
-                ) : (
-                  <>
-                    {LUCKY_PRIZES.map((prize) => {
-                      const winners = allWinners.filter((w) => w.prize_type === 'lucky' && w.prize === prize.name)
-                      if (winners.length === 0) return null
-                      return (
-                        <div key={prize.name} className="mb-4 last:mb-0">
-                          <h4 className="text-sm font-bold text-gray-600 mb-2">{prize.name}</h4>
-                          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                            {winners.map((w, i) => (
-                              <div key={w.id} className="bg-primary-light text-primary rounded-lg p-3 text-sm">
-                                <div className="font-bold">{i + 1}. {w.name}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
+                })}
               </div>
             </div>
           </div>
         )}
       </main>
 
-      <footer className="mt-auto py-4 text-center text-xs text-gray-400">
-        주최: 교육부 | 주관: KRIVET 한국직업능력연구원
-      </footer>
       <canvas id="confetti-canvas" />
     </div>
   )
