@@ -640,15 +640,15 @@ export default function Home() {
           <div className="text-white/40 text-xs font-medium tracking-widest uppercase mb-0.5">
             2026 KAORN 병원수술간호사회
           </div>
-          <h1 className={`text-white font-bold ${drawPage === 'prize' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'}`}>
+          <h1 className={`text-white font-bold inline-flex items-center gap-2 justify-center ${drawPage === 'prize' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'}`}>
             제37회 학술대회 및 제12회 Surgical EXPO
+            <span
+              className="text-xs font-bold px-2.5 py-0.5 rounded-full"
+              style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', whiteSpace: 'nowrap' }}
+            >
+              경품 추첨
+            </span>
           </h1>
-          <div
-            className="inline-block mt-1.5 text-xs font-bold px-3 py-0.5 rounded-full"
-            style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}
-          >
-            경품 추첨
-          </div>
         </div>
         <button
           onClick={() => setMode('setup')}
@@ -748,21 +748,28 @@ export default function Home() {
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
             >
               <div
-                className="inline-block text-sm font-bold px-4 py-1 rounded-full mb-5"
-                style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
+                className="inline-block font-black rounded-full mb-6"
+                style={{
+                  fontSize: 'clamp(1.1rem, 2vw, 1.6rem)',
+                  padding: 'clamp(0.5rem, 1vw, 0.8rem) clamp(1.5rem, 3vw, 2.5rem)',
+                  background: 'rgba(99,102,241,0.25)',
+                  color: '#c4b5fd',
+                  border: '2px solid rgba(139,92,246,0.5)',
+                  boxShadow: '0 0 24px rgba(99,102,241,0.3)',
+                }}
               >
                 {activePrize.id}번 경품
               </div>
               <h2
-                className="text-white font-black leading-snug mb-5"
-                style={{ fontSize: 'clamp(1.4rem, 2.8vw, 2.8rem)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}
+                className="text-white font-black leading-snug mb-6"
+                style={{ fontSize: 'clamp(1.8rem, 3.8vw, 3.8rem)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}
               >
                 {activePrize.name}
               </h2>
-              <p style={{ fontSize: 'clamp(1rem, 1.8vw, 1.4rem)', color: 'rgba(255,255,255,0.45)' }}>
-                추첨자: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>{activePrize.drawer}</span>
+              <p style={{ fontSize: 'clamp(1.1rem, 2vw, 1.7rem)', color: 'rgba(255,255,255,0.55)' }}>
+                추첨자: <span style={{ color: '#93c5fd', fontWeight: 700 }}>{activePrize.drawer}</span>
               </p>
-              <p className="mt-2" style={{ fontSize: 'clamp(0.85rem, 1.3vw, 1.1rem)', color: 'rgba(255,255,255,0.3)' }}>
+              <p className="mt-3" style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', color: 'rgba(255,255,255,0.35)' }}>
                 {activePrizeConfirmed.length}/{activePrize.count}명 확정
                 {remaining > 0 && ` · 추첨 대상 ${remaining}명`}
               </p>
