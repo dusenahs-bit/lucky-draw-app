@@ -637,17 +637,11 @@ export default function Home() {
         style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}
       >
         <div className="text-center">
-          <div className="text-white/40 text-xs font-medium tracking-widest uppercase mb-0.5">
+          <div className="text-white text-xs font-medium tracking-widest uppercase mb-0.5">
             2026 KAORN 병원수술간호사회
           </div>
-          <h1 className={`text-white font-bold inline-flex items-center gap-2 justify-center ${drawPage === 'prize' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'}`}>
-            제37회 학술대회 및 제12회 Surgical EXPO
-            <span
-              className="text-xs font-bold px-2.5 py-0.5 rounded-full"
-              style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)', whiteSpace: 'nowrap' }}
-            >
-              경품 추첨
-            </span>
+          <h1 className={`text-white font-bold ${drawPage === 'prize' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'}`}>
+            제37회 학술대회 및 제12회 Surgical EXPO <span style={{ color: '#fbbf24' }}>경품추첨</span>
           </h1>
         </div>
         <button
@@ -766,8 +760,8 @@ export default function Home() {
               >
                 {activePrize.name}
               </h2>
-              <p style={{ fontSize: 'clamp(1.1rem, 2vw, 1.7rem)', color: 'rgba(255,255,255,0.55)' }}>
-                추첨자: <span style={{ color: '#93c5fd', fontWeight: 700 }}>{activePrize.drawer}</span>
+              <p style={{ fontSize: 'clamp(1.3rem, 2.4vw, 2rem)', color: '#93c5fd', fontWeight: 700 }}>
+                추첨자: {activePrize.drawer}
               </p>
               <p className="mt-3" style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', color: 'rgba(255,255,255,0.35)' }}>
                 {activePrizeConfirmed.length}/{activePrize.count}명 확정
