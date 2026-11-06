@@ -70,7 +70,7 @@ function parseExcel(data: Uint8Array): Participant[] {
 
 // ===== AUDIO =====
 let sfxAudio: HTMLAudioElement | null = null      // 두구두구 (카운트다운)
-let fanfareAudio: HTMLAudioElement | null = null  // 팡파레 (재추첨용)
+let fanfareAudio: HTMLAudioElement | null = null  // 팡파레 (당첨 발표)
 
 function preloadAudio() {
   if (typeof window === 'undefined') return
@@ -79,7 +79,7 @@ function preloadAudio() {
     sfxAudio.preload = 'auto'
   }
   if (!fanfareAudio) {
-    fanfareAudio = new Audio('/drumroll-fanfare.mp3')
+    fanfareAudio = new Audio('/fanfare.mp3')
     fanfareAudio.preload = 'auto'
   }
 }
@@ -98,26 +98,17 @@ function stopCountdownAudio() {
   sfxAudio.currentTime = 0
 }
 
-function playAudio() {  // 재추첨용 팡파레
+function playFanfare() {
   preloadAudio()
   if (!fanfareAudio) return
   fanfareAudio.currentTime = 0
-  fanfareAudio.volume = 0.8
+  fanfareAudio.volume = 0.9
   fanfareAudio.play().catch(() => {})
 }
 
-function stopAudioAt(sec: number) {
-  if (!fanfareAudio) return
-  const check = () => {
-    if (fanfareAudio && fanfareAudio.currentTime >= sec) {
-      fanfareAudio.pause()
-      fanfareAudio.currentTime = 0
-      return
-    }
-    if (fanfareAudio && !fanfareAudio.paused) requestAnimationFrame(check)
-  }
-  requestAnimationFrame(check)
-}
+// 하위 호환
+function playAudio() { playFanfare() }
+function stopAudioAt(_sec: number) { /* 미사용 */ }
 
 // ===== CONFETTI =====
 function fireConfetti(ms = 2500) {
@@ -216,7 +207,8 @@ function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
       n--
       if (n <= 0) {
         setCount(0)
-        // 효과음은 멈추지 않음 — 두구두구→빵빠래가 자연스럽게 이어짐
+        stopCountdownAudio()   // 두구두구 정지
+        playFanfare()          // 팡파레 재생
         setTimeout(() => { if (alive) onCompleteRef.current() }, 150)
         return
       }
