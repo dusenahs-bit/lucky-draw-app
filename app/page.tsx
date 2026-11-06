@@ -772,35 +772,59 @@ export default function Home() {
 
             {/* Prize info */}
             <div
-              className="text-center py-10 px-8 rounded-3xl"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+              className="text-center rounded-3xl"
+              style={{
+                background: 'rgba(255,255,255,0.03)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                padding: activePrize?.noRedraw && drawPhase === 'reveal' ? '1.2rem 2rem' : 'clamp(1.5rem, 4vw, 2.5rem) 2rem',
+              }}
             >
-              <div
-                className="inline-block font-black rounded-full mb-6"
-                style={{
-                  fontSize: 'clamp(1.1rem, 2vw, 1.6rem)',
-                  padding: 'clamp(0.5rem, 1vw, 0.8rem) clamp(1.5rem, 3vw, 2.5rem)',
-                  background: 'rgba(99,102,241,0.25)',
-                  color: '#c4b5fd',
-                  border: '2px solid rgba(139,92,246,0.5)',
-                  boxShadow: '0 0 24px rgba(99,102,241,0.3)',
-                }}
-              >
-                {activePrize.id}번 경품
-              </div>
-              <h2
-                className="text-white font-black leading-snug mb-6"
-                style={{ fontSize: 'clamp(1.8rem, 3.8vw, 3.8rem)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}
-              >
-                {activePrize.name}
-              </h2>
-              <p style={{ fontSize: 'clamp(1.3rem, 2.4vw, 2rem)', color: '#93c5fd', fontWeight: 700 }}>
-                추첨자: {activePrize.drawer}
-              </p>
-              <p className="mt-3" style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', color: 'rgba(255,255,255,0.35)' }}>
-                {activePrizeConfirmed.length}/{activePrize.count}명 확정
-                {remaining > 0 && ` · 추첨 대상 ${remaining}명`}
-              </p>
+              {/* noRedraw reveal 시 한 줄 압축 표시 */}
+              {activePrize.noRedraw && drawPhase === 'reveal' ? (
+                <div className="flex items-center justify-center gap-4 flex-wrap">
+                  <span
+                    className="font-black rounded-full px-3 py-1"
+                    style={{ fontSize: '0.95rem', background: 'rgba(99,102,241,0.25)', color: '#c4b5fd', border: '1.5px solid rgba(139,92,246,0.5)' }}
+                  >
+                    {activePrize.id}번 경품
+                  </span>
+                  <span className="text-white font-black" style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', wordBreak: 'keep-all' }}>
+                    {activePrize.name}
+                  </span>
+                  <span style={{ fontSize: '1rem', color: '#93c5fd', fontWeight: 700 }}>
+                    추첨자: {activePrize.drawer}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  <div
+                    className="inline-block font-black rounded-full mb-6"
+                    style={{
+                      fontSize: 'clamp(1.1rem, 2vw, 1.6rem)',
+                      padding: 'clamp(0.5rem, 1vw, 0.8rem) clamp(1.5rem, 3vw, 2.5rem)',
+                      background: 'rgba(99,102,241,0.25)',
+                      color: '#c4b5fd',
+                      border: '2px solid rgba(139,92,246,0.5)',
+                      boxShadow: '0 0 24px rgba(99,102,241,0.3)',
+                    }}
+                  >
+                    {activePrize.id}번 경품
+                  </div>
+                  <h2
+                    className="text-white font-black leading-snug mb-6"
+                    style={{ fontSize: 'clamp(1.8rem, 3.8vw, 3.8rem)', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}
+                  >
+                    {activePrize.name}
+                  </h2>
+                  <p style={{ fontSize: 'clamp(1.3rem, 2.4vw, 2rem)', color: '#93c5fd', fontWeight: 700 }}>
+                    추첨자: {activePrize.drawer}
+                  </p>
+                  <p className="mt-3" style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', color: 'rgba(255,255,255,0.35)' }}>
+                    {activePrizeConfirmed.length}/{activePrize.count}명 확정
+                    {remaining > 0 && ` · 추첨 대상 ${remaining}명`}
+                  </p>
+                </>
+              )}
             </div>
 
             {/* DRUMROLL phase */}
@@ -850,26 +874,33 @@ export default function Home() {
             {/* REVEAL phase: winner cards */}
             {drawPhase === 'reveal' && pending.length > 0 && (
               <div>
-                <h3 className="text-center font-black text-white mb-8" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)' }}>
+                {/* noRedraw 모드에서는 헤딩을 작게 */}
+                <h3
+                  className="text-center font-black text-white"
+                  style={{
+                    fontSize: activePrize?.noRedraw ? 'clamp(1.2rem, 2vw, 1.8rem)' : 'clamp(2rem, 4vw, 3.5rem)',
+                    marginBottom: activePrize?.noRedraw ? '0.5rem' : '2rem',
+                  }}
+                >
                   🎉 당첨을 축하합니다!
                 </h3>
 
                 {/* ── noRedraw 모드: 콤팩트 그리드 (올리브영 100명 등) ── */}
                 {activePrize?.noRedraw ? (
                   <div>
-                    <p className="text-center text-white/40 text-sm mb-6">총 {pending.length}명 당첨</p>
-                    <div className="grid gap-2 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))' }}>
+                    <p className="text-center text-white/40 text-xs mb-3">총 {pending.length}명 당첨</p>
+                    <div className="grid gap-1.5 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))' }}>
                       {pending.map((p, i) => (
                         <div
                           key={i}
-                          className="rounded-xl px-3 py-2.5 text-center winner-reveal"
+                          className="rounded-lg px-2 py-1.5 text-center winner-reveal"
                           style={{
                             background: 'rgba(99,102,241,0.18)',
                             border: '1px solid rgba(139,92,246,0.35)',
                             animationDelay: `${Math.min(i * 0.03, 1.5)}s`,
                           }}
                         >
-                          <span className="text-white font-bold text-sm">{p.display}</span>
+                          <span className="text-white font-bold text-xs">{p.display}</span>
                         </div>
                       ))}
                     </div>
