@@ -87,7 +87,7 @@ function preloadAudio() {
 function playCountdownAudio() {
   preloadAudio()
   if (!sfxAudio) return
-  sfxAudio.currentTime = 0
+  sfxAudio.currentTime = 1  // 1초부터 재생 시 5초 카운트다운과 타이밍 일치
   sfxAudio.volume = 0.9
   sfxAudio.play().catch(() => {})
 }
@@ -295,6 +295,9 @@ export default function Home() {
   const [pendingConfirmed, setPendingConfirmed] = useState<Set<string>>(new Set())
   const [redrawingIdx, setRedrawingIdx] = useState<number | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 재추첨 모드: 'single'(단일), 'batch'(미확인 전체), null(최초추첨)
+  const redrawModeRef = useRef<'single' | 'batch' | null>(null)
+  const redrawIdxRef = useRef<number>(-1)
 
   // Results
   const [copied, setCopied] = useState(false)
@@ -347,17 +350,62 @@ export default function Home() {
   }
 
   const onCountdownComplete = useCallback(() => {
+    const mode = redrawModeRef.current
+    redrawModeRef.current = null  // 모드 초기화
+
+    if (mode === 'single') {
+      // 단일 재추첨
+      const idx = redrawIdxRef.current
+      const excludeKeys = new Set([
+        ...Object.values(confirmed).flat().map((p) => p.key),
+        ...pending.filter((_, i) => i !== idx).map((p) => p.key),
+      ])
+      const pool = participants.filter((p) => !excludeKeys.has(p.key))
+      const winner = shuffle(pool)[0]
+      if (winner) {
+        setPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
+      }
+      setRedrawingIdx(null)
+      setDrawPhase('reveal')
+      setTimeout(() => fireConfetti(2500), 200)
+      return
+    }
+
+    if (mode === 'batch') {
+      // 미확인자 일괄 재추첨
+      const keepKeys = new Set(
+        pending.filter((p) => pendingConfirmed.has(p.key)).map((p) => p.key)
+      )
+      const excludeKeys = new Set([
+        ...Object.values(confirmed).flat().map((p) => p.key),
+        ...keepKeys,
+      ])
+      const pool = participants.filter((p) => !excludeKeys.has(p.key))
+      const unconfirmedCount = pending.filter((p) => !pendingConfirmed.has(p.key)).length
+      const newWinners = shuffle(pool).slice(0, Math.min(unconfirmedCount, pool.length))
+      let ni = 0
+      setPending((prev) =>
+        prev.map((p) =>
+          !pendingConfirmed.has(p.key) && ni < newWinners.length
+            ? newWinners[ni++]
+            : p
+        )
+      )
+      setRedrawingIdx(null)
+      setDrawPhase('reveal')
+      setTimeout(() => fireConfetti(2500), 200)
+      return
+    }
+
+    // 최초 추첨
     const pool = getPool(activePrizeId)
     const drawCount = Math.min(remaining, pool.length)
     if (drawCount <= 0) { setDrawPhase('idle'); return }
-
-    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal
-    // 효과음은 CountdownOverlay에서 흘러온 것이 그대로 빵빠래로 이어짐
     const winners = shuffle(pool).slice(0, drawCount)
     setPending(winners)
     setDrawPhase('reveal')
     setTimeout(() => fireConfetti(2500), 200)
-  }, [activePrizeId, getPool, remaining])
+  }, [activePrizeId, getPool, remaining, confirmed, pending, pendingConfirmed, participants])
 
   const confirmWinner = async (p: Participant) => {
     setConfirmed((prev) => ({
@@ -391,62 +439,16 @@ export default function Home() {
     ])
     const pool = participants.filter((p) => !excludeKeys.has(p.key))
     if (pool.length === 0) return
-    setRedrawingIdx(idx)
-    playAudio()
-    const timer = setInterval(() => {
-      setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
-      setPending((prev) =>
-        prev.map((p, i) =>
-          i === idx ? { ...shuffle(pool)[0], key: `_tmp_${Date.now()}` } : p
-        )
-      )
-    }, 100)
-    setTimeout(() => {
-      clearInterval(timer)
-      const winner = shuffle(pool)[0]
-      setPending((prev) => prev.map((p, i) => (i === idx ? winner : p)))
-      setRedrawingIdx(null)
-      setDrumName('')
-      setTimeout(() => fireConfetti(2000), 400)
-      stopAudioAt(10)
-    }, 5500)
+    redrawModeRef.current = 'single'
+    redrawIdxRef.current = idx
+    setDrawPhase('countdown')
   }
 
   const redrawUnconfirmed = () => {
     const unconfirmed = pending.filter((p) => !pendingConfirmed.has(p.key))
     if (unconfirmed.length === 0) return
-    const keepKeys = new Set(
-      pending.filter((p) => pendingConfirmed.has(p.key)).map((p) => p.key)
-    )
-    const excludeKeys = new Set([...allConfirmedKeys(), ...keepKeys])
-    const pool = participants.filter((p) => !excludeKeys.has(p.key))
-    setRedrawingIdx(-1)
-    playAudio()
-    const timer = setInterval(() => {
-      setDrumName(pool[Math.floor(Math.random() * pool.length)]?.name ?? '')
-      setPending((prev) =>
-        prev.map((p) =>
-          !pendingConfirmed.has(p.key)
-            ? { ...shuffle(pool)[0], key: `_tmp_${Date.now()}_${Math.random()}` }
-            : p
-        )
-      )
-    }, 100)
-    setTimeout(() => {
-      clearInterval(timer)
-      const newWinners = shuffle(pool).slice(0, Math.min(unconfirmed.length, pool.length))
-      let ni = 0
-      setPending((prev) =>
-        prev.map((p) => {
-          if (p.key.startsWith('_tmp_') && ni < newWinners.length) return newWinners[ni++]
-          return p
-        })
-      )
-      setRedrawingIdx(null)
-      setDrumName('')
-      setTimeout(() => fireConfetti(2000), 400)
-      stopAudioAt(10)
-    }, 5500)
+    redrawModeRef.current = 'batch'
+    setDrawPhase('countdown')
   }
 
   const allPendingConfirmed =
