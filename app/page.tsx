@@ -727,6 +727,26 @@ export default function Home() {
             >
               최종 결과 보기
             </button>
+
+            {Object.keys(confirmed).length > 0 && (
+              <button
+                onClick={() => {
+                  if (!confirm('추첨 내역을 초기화하시겠습니까?\n(참가자 명단은 유지됩니다)')) return
+                  setConfirmed({})
+                  setPending([])
+                  setPendingConfirmed(new Set())
+                  setDrawPhase('idle')
+                }}
+                className="w-full p-3 rounded-2xl text-sm transition-all hover:opacity-80 mt-1"
+                style={{
+                  background: 'rgba(239,68,68,0.08)',
+                  border: '1px solid rgba(239,68,68,0.2)',
+                  color: 'rgba(239,68,68,0.6)',
+                }}
+              >
+                추첨 내역 초기화
+              </button>
+            )}
           </div>
         )}
 
