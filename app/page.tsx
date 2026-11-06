@@ -16,6 +16,7 @@ interface Prize {
   name: string
   count: number
   drawer: string
+  noRedraw?: boolean  // true: 재추첨 없이 전체 즉시 확정 (모바일 발송용)
 }
 
 type Mode = 'setup' | 'draw'
@@ -30,10 +31,11 @@ const DEFAULT_PRIZES: Prize[] = [
   { id: 4, name: '애플 아이패드 에어11(M4 256GB)', count: 1, drawer: '김미형 회장' },
   { id: 5, name: 'LG 스탠마이미2', count: 1, drawer: '주미자 제2부회장' },
   { id: 6, name: 'LG전자 시네빔 4K 쇼츠+스탠드', count: 1, drawer: '이윤아 제1부회장' },
-  { id: 7, name: '삼성전자 갤럭시Z폴드8(256GB)', count: 1, drawer: '김미형 회장' },
+  { id: 7, name: '[깜짝] 올리브영 2만원권', count: 100, drawer: '김미형 회장', noRedraw: true },
+  { id: 8, name: '삼성전자 갤럭시Z폴드8(256GB)', count: 1, drawer: '김미형 회장' },
 ]
 
-const STORAGE_KEY = 'kaorn-draw-2026'
+const STORAGE_KEY = 'kaorn-draw-2026-v2'
 
 // ===== HELPERS =====
 function shuffle<T>(arr: T[]): T[] {
@@ -450,9 +452,17 @@ export default function Home() {
     setPending([])
     setPendingConfirmed(new Set())
     setDrawPhase('idle')
-    // 해당 경품 추첨 완료 시 목록으로 이동
+    // 추첨 완료 시 다음 미완료 경품으로 직접 이동, 없으면 목록으로
     if (isPrizeDone(activePrizeId)) {
-      setDrawPage('home')
+      const nextPrize = prizes.find(
+        (p) => p.id > activePrizeId && (confirmed[p.id]?.length ?? 0) < p.count
+      )
+      if (nextPrize) {
+        setActivePrizeId(nextPrize.id)
+        // drawPage는 'prize' 유지 — 다음 경품 화면으로 바로 전환
+      } else {
+        setDrawPage('home')
+      }
     }
   }
 
@@ -815,111 +825,154 @@ export default function Home() {
             {/* REVEAL phase: winner cards */}
             {drawPhase === 'reveal' && pending.length > 0 && (
               <div>
-                <h3 className="text-center font-black text-white mb-10" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)' }}>
+                <h3 className="text-center font-black text-white mb-8" style={{ fontSize: 'clamp(2rem, 4vw, 3.5rem)' }}>
                   🎉 당첨을 축하합니다!
                 </h3>
-                <div
-                  className={`grid gap-5 mb-8 ${
-                    pending.length === 1 ? 'grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2'
-                  }`}
-                >
-                  {pending.map((p, i) => {
-                    const isConfirmed = pendingConfirmed.has(p.key)
-                    const isTmp = p.key.startsWith('_tmp_')
-                    const isRedrawing =
-                      (redrawingIdx === i || (redrawingIdx === -1 && !isConfirmed && isTmp))
 
-                    return (
-                      <div
-                        key={i}
-                        className={`rounded-2xl p-7 text-center ${
-                          isRedrawing ? 'card-drumroll' : isConfirmed ? '' : 'winner-reveal'
-                        }`}
+                {/* ── noRedraw 모드: 콤팩트 그리드 (올리브영 100명 등) ── */}
+                {activePrize?.noRedraw ? (
+                  <div>
+                    <p className="text-center text-white/40 text-sm mb-6">총 {pending.length}명 당첨</p>
+                    <div className="grid gap-2 mb-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))' }}>
+                      {pending.map((p, i) => (
+                        <div
+                          key={i}
+                          className="rounded-xl px-3 py-2.5 text-center winner-reveal"
+                          style={{
+                            background: 'rgba(99,102,241,0.18)',
+                            border: '1px solid rgba(139,92,246,0.35)',
+                            animationDelay: `${Math.min(i * 0.03, 1.5)}s`,
+                          }}
+                        >
+                          <span className="text-white font-bold text-sm">{p.display}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-center">
+                      <button
+                        onClick={async () => {
+                          // 전체 한꺼번에 확정
+                          for (const p of pending) {
+                            await confirmWinner(p)
+                          }
+                          finishBatch()
+                        }}
+                        className="text-white font-black py-5 px-16 rounded-full transition-all hover:scale-105 text-lg"
                         style={{
-                          background: isRedrawing
-                            ? 'rgba(99,102,241,0.2)'
-                            : isConfirmed
-                            ? 'rgba(16,185,129,0.15)'
-                            : 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(124,58,237,0.3))',
-                          border: isRedrawing
-                            ? '1px solid rgba(99,102,241,0.4)'
-                            : isConfirmed
-                            ? '1px solid rgba(16,185,129,0.4)'
-                            : '1px solid rgba(139,92,246,0.4)',
-                          animationDelay: `${i * 0.15}s`,
-                          boxShadow: isConfirmed
-                            ? 'none'
-                            : '0 0 40px rgba(99,102,241,0.15)',
+                          background: 'rgba(99,102,241,0.4)',
+                          border: '2px solid rgba(139,92,246,0.6)',
+                          boxShadow: '0 0 40px rgba(99,102,241,0.4)',
                         }}
                       >
-                        <div
-                          className="font-black mb-5"
-                          style={{ fontSize: 'clamp(1.8rem, 4vw, 3.5rem)', color: isConfirmed ? '#6ee7b7' : 'white' }}
+                        전체 확정 ({pending.length}명) → 다음 추첨으로
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── 일반 모드: 현장확인 / 재추첨 카드 ── */
+                  <div>
+                    <div
+                      className={`grid gap-5 mb-8 ${
+                        pending.length === 1 ? 'grid-cols-1 max-w-md mx-auto' : 'grid-cols-1 md:grid-cols-2'
+                      }`}
+                    >
+                      {pending.map((p, i) => {
+                        const isConfirmed = pendingConfirmed.has(p.key)
+                        const isTmp = p.key.startsWith('_tmp_')
+                        const isRedrawing =
+                          (redrawingIdx === i || (redrawingIdx === -1 && !isConfirmed && isTmp))
+
+                        return (
+                          <div
+                            key={i}
+                            className={`rounded-2xl p-7 text-center ${
+                              isRedrawing ? 'card-drumroll' : isConfirmed ? '' : 'winner-reveal'
+                            }`}
+                            style={{
+                              background: isRedrawing
+                                ? 'rgba(99,102,241,0.2)'
+                                : isConfirmed
+                                ? 'rgba(16,185,129,0.15)'
+                                : 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(124,58,237,0.3))',
+                              border: isRedrawing
+                                ? '1px solid rgba(99,102,241,0.4)'
+                                : isConfirmed
+                                ? '1px solid rgba(16,185,129,0.4)'
+                                : '1px solid rgba(139,92,246,0.4)',
+                              animationDelay: `${i * 0.15}s`,
+                              boxShadow: isConfirmed ? 'none' : '0 0 40px rgba(99,102,241,0.15)',
+                            }}
+                          >
+                            <div
+                              className="font-black mb-5"
+                              style={{ fontSize: 'clamp(1.8rem, 4vw, 3.5rem)', color: isConfirmed ? '#6ee7b7' : 'white' }}
+                            >
+                              {isRedrawing ? p.name : p.display}
+                            </div>
+
+                            {isConfirmed ? (
+                              <div className="flex items-center justify-center gap-3">
+                                <span className="text-emerald-400 text-sm font-bold">현장 확인 완료 ✓</span>
+                                <button
+                                  onClick={() => undoConfirm(p)}
+                                  className="text-xs text-white/30 hover:text-white/60 px-3 py-1 rounded-full transition-colors"
+                                  style={{ background: 'rgba(255,255,255,0.08)' }}
+                                >
+                                  취소
+                                </button>
+                              </div>
+                            ) : isRedrawing ? (
+                              <p className="text-white/30 text-sm">재추첨 중...</p>
+                            ) : (
+                              <div className="flex gap-3 justify-center">
+                                <button
+                                  onClick={() => confirmWinner(p)}
+                                  disabled={redrawingIdx !== null}
+                                  className="font-bold text-white rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                                  style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.6)' }}
+                                >
+                                  현장 확인
+                                </button>
+                                <button
+                                  onClick={() => startSingleRedraw(i)}
+                                  disabled={redrawingIdx !== null}
+                                  className="font-bold text-white/60 rounded-full disabled:opacity-30 transition-all hover:scale-105"
+                                  style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                                >
+                                  재추첨
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="flex justify-center">
+                      {allPendingConfirmed ? (
+                        <button
+                          onClick={finishBatch}
+                          className="text-white font-black py-5 px-16 rounded-full transition-all hover:scale-105 text-lg"
+                          style={{
+                            background: 'linear-gradient(135deg, #1a3a8a, #4c1d95)',
+                            boxShadow: '0 0 40px rgba(99,102,241,0.4)',
+                          }}
                         >
-                          {isRedrawing ? p.name : p.display}
-                        </div>
-
-                        {isConfirmed ? (
-                          <div className="flex items-center justify-center gap-3">
-                            <span className="text-emerald-400 text-sm font-bold">현장 확인 완료 ✓</span>
-                            <button
-                              onClick={() => undoConfirm(p)}
-                              className="text-xs text-white/30 hover:text-white/60 px-3 py-1 rounded-full transition-colors"
-                              style={{ background: 'rgba(255,255,255,0.08)' }}
-                            >
-                              취소
-                            </button>
-                          </div>
-                        ) : isRedrawing ? (
-                          <p className="text-white/30 text-sm">재추첨 중...</p>
-                        ) : (
-                          <div className="flex gap-3 justify-center">
-                            <button
-                              onClick={() => confirmWinner(p)}
-                              disabled={redrawingIdx !== null}
-                              className="font-bold text-white rounded-full disabled:opacity-30 transition-all hover:scale-105"
-                              style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(16,185,129,0.4)', border: '1px solid rgba(16,185,129,0.6)' }}
-                            >
-                              현장 확인
-                            </button>
-                            <button
-                              onClick={() => startSingleRedraw(i)}
-                              disabled={redrawingIdx !== null}
-                              className="font-bold text-white/60 rounded-full disabled:opacity-30 transition-all hover:scale-105"
-                              style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1.2rem)', padding: '0.75rem 2.5rem', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
-                            >
-                              재추첨
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-
-                <div className="flex justify-center">
-                  {allPendingConfirmed ? (
-                    <button
-                      onClick={finishBatch}
-                      className="text-white font-black py-5 px-16 rounded-full transition-all hover:scale-105 text-lg"
-                      style={{
-                        background: 'linear-gradient(135deg, #1a3a8a, #4c1d95)',
-                        boxShadow: '0 0 40px rgba(99,102,241,0.4)',
-                      }}
-                    >
-                      {isPrizeDone(activePrizeId) ? '다음 추첨으로 →' : '계속 추첨'}
-                    </button>
-                  ) : (
-                    <button
-                      onClick={redrawUnconfirmed}
-                      disabled={redrawingIdx !== null}
-                      className="text-white font-bold py-4 px-10 rounded-full disabled:opacity-30 transition-all"
-                      style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
-                    >
-                      미확인자 재추첨 ({pending.filter((p) => !pendingConfirmed.has(p.key)).length}명)
-                    </button>
-                  )}
-                </div>
+                          {isPrizeDone(activePrizeId) ? '다음 추첨으로 →' : '계속 추첨'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={redrawUnconfirmed}
+                          disabled={redrawingIdx !== null}
+                          className="text-white font-bold py-4 px-10 rounded-full disabled:opacity-30 transition-all"
+                          style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                        >
+                          미확인자 재추첨 ({pending.filter((p) => !pendingConfirmed.has(p.key)).length}명)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
