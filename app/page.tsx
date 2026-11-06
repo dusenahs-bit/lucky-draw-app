@@ -86,12 +86,17 @@ function preloadAudio() {
   }
 }
 
+let sfxStopTimer: ReturnType<typeof setTimeout> | null = null
+
 function playCountdownAudio() {
   preloadAudio()
   if (!sfxAudio) return
   sfxAudio.currentTime = 1  // 1초부터 재생 시 5초 카운트다운과 타이밍 일치
   sfxAudio.volume = 0.9
   sfxAudio.play().catch(() => {})
+  // 5초 후 자동 종료 (카운트다운 길이와 일치)
+  if (sfxStopTimer) clearTimeout(sfxStopTimer)
+  sfxStopTimer = setTimeout(() => { stopCountdownAudio() }, 5000)
 }
 
 function stopCountdownAudio() {
