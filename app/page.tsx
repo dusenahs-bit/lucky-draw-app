@@ -216,8 +216,7 @@ function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
       n--
       if (n <= 0) {
         setCount(0)
-        // 효과음 멈추고 즉시 완료 콜백
-        stopCountdownAudio()
+        // 효과음은 멈추지 않음 — 두구두구→빵빠래가 자연스럽게 이어짐
         setTimeout(() => { if (alive) onCompleteRef.current() }, 150)
         return
       }
@@ -228,6 +227,7 @@ function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
     return () => {
       alive = false
       clearTimeout(t)
+      // 컴포넌트 unmount 시에만 정지 (재추첨 등 취소 케이스)
       stopCountdownAudio()
     }
   }, [])
@@ -351,11 +351,12 @@ export default function Home() {
     const drawCount = Math.min(remaining, pool.length)
     if (drawCount <= 0) { setDrawPhase('idle'); return }
 
-    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal + 빵빠래
+    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal
+    // 효과음은 CountdownOverlay에서 흘러온 것이 그대로 빵빠래로 이어짐
     const winners = shuffle(pool).slice(0, drawCount)
     setPending(winners)
     setDrawPhase('reveal')
-    setTimeout(() => { fireConfetti(2500); playAudio() }, 200)
+    setTimeout(() => fireConfetti(2500), 200)
   }, [activePrizeId, getPool, remaining])
 
   const confirmWinner = async (p: Participant) => {
