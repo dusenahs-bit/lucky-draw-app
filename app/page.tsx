@@ -69,28 +69,52 @@ function parseExcel(data: Uint8Array): Participant[] {
 }
 
 // ===== AUDIO =====
-let sfxAudio: HTMLAudioElement | null = null
+let sfxAudio: HTMLAudioElement | null = null      // 두구두구 (카운트다운)
+let fanfareAudio: HTMLAudioElement | null = null  // 팡파레 (재추첨용)
+
 function preloadAudio() {
-  if (typeof window === 'undefined' || sfxAudio) return
-  sfxAudio = new Audio('/drumroll-fanfare.mp3')
-  sfxAudio.preload = 'auto'
+  if (typeof window === 'undefined') return
+  if (!sfxAudio) {
+    sfxAudio = new Audio('/두구두구두구 당첨 효과음.mp3')
+    sfxAudio.preload = 'auto'
+  }
+  if (!fanfareAudio) {
+    fanfareAudio = new Audio('/drumroll-fanfare.mp3')
+    fanfareAudio.preload = 'auto'
+  }
 }
-function playAudio() {
+
+function playCountdownAudio() {
   preloadAudio()
   if (!sfxAudio) return
   sfxAudio.currentTime = 0
-  sfxAudio.volume = 0.8
+  sfxAudio.volume = 0.9
   sfxAudio.play().catch(() => {})
 }
-function stopAudioAt(sec: number) {
+
+function stopCountdownAudio() {
   if (!sfxAudio) return
+  sfxAudio.pause()
+  sfxAudio.currentTime = 0
+}
+
+function playAudio() {  // 재추첨용 팡파레
+  preloadAudio()
+  if (!fanfareAudio) return
+  fanfareAudio.currentTime = 0
+  fanfareAudio.volume = 0.8
+  fanfareAudio.play().catch(() => {})
+}
+
+function stopAudioAt(sec: number) {
+  if (!fanfareAudio) return
   const check = () => {
-    if (sfxAudio && sfxAudio.currentTime >= sec) {
-      sfxAudio.pause()
-      sfxAudio.currentTime = 0
+    if (fanfareAudio && fanfareAudio.currentTime >= sec) {
+      fanfareAudio.pause()
+      fanfareAudio.currentTime = 0
       return
     }
-    if (sfxAudio && !sfxAudio.paused) requestAnimationFrame(check)
+    if (fanfareAudio && !fanfareAudio.paused) requestAnimationFrame(check)
   }
   requestAnimationFrame(check)
 }
@@ -182,6 +206,9 @@ function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
   onCompleteRef.current = onComplete
 
   useEffect(() => {
+    // 마운트 시 두구두구 효과음 재생
+    playCountdownAudio()
+
     let alive = true
     let n = 5
     const tick = () => {
@@ -189,14 +216,20 @@ function CountdownOverlay({ onComplete }: { onComplete: () => void }) {
       n--
       if (n <= 0) {
         setCount(0)
-        setTimeout(() => { if (alive) onCompleteRef.current() }, 500)
+        // 효과음 멈추고 즉시 완료 콜백
+        stopCountdownAudio()
+        setTimeout(() => { if (alive) onCompleteRef.current() }, 150)
         return
       }
       setCount(n)
       setTimeout(tick, 1000)
     }
     const t = setTimeout(tick, 1000)
-    return () => { alive = false; clearTimeout(t) }
+    return () => {
+      alive = false
+      clearTimeout(t)
+      stopCountdownAudio()
+    }
   }, [])
 
   const isWarm = count <= 2
@@ -318,23 +351,11 @@ export default function Home() {
     const drawCount = Math.min(remaining, pool.length)
     if (drawCount <= 0) { setDrawPhase('idle'); return }
 
-    setDrawPhase('drumroll')
-    setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
-    playAudio()
-
-    timerRef.current = setInterval(() => {
-      setDrumName(pool[Math.floor(Math.random() * pool.length)].name)
-    }, 100)
-
-    setTimeout(() => {
-      if (timerRef.current) clearInterval(timerRef.current)
-      const winners = shuffle(pool).slice(0, drawCount)
-      setPending(winners)
-      setDrumName('')
-      setDrawPhase('reveal')
-      setTimeout(() => fireConfetti(2500), 400)
-      stopAudioAt(10)
-    }, 5500)
+    // 카운트다운 끝나면 즉시 당첨자 선정 후 reveal
+    const winners = shuffle(pool).slice(0, drawCount)
+    setPending(winners)
+    setDrawPhase('reveal')
+    setTimeout(() => fireConfetti(2500), 200)
   }, [activePrizeId, getPool, remaining])
 
   const confirmWinner = async (p: Participant) => {

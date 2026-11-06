@@ -51,16 +51,18 @@ body {
   animation: card-drumroll 0.12s ease-in-out infinite;
 }
 
-/* Countdown number animation */
+/* Countdown number animation — no blur, crisp */
 @keyframes countdown-pop {
-  0%   { transform: scale(2.8); opacity: 0; filter: blur(24px); }
-  20%  { transform: scale(0.92); opacity: 1; filter: blur(0px); }
-  55%  { transform: scale(1.06); opacity: 1; }
+  0%   { transform: scale(2.4); opacity: 0; }
+  18%  { transform: scale(0.9); opacity: 1; }
+  50%  { transform: scale(1.08); opacity: 1; }
   80%  { transform: scale(1); opacity: 1; }
-  100% { transform: scale(0.5); opacity: 0; filter: blur(16px); }
+  100% { transform: scale(0.55); opacity: 0; }
 }
 .countdown-number {
   animation: countdown-pop 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* Countdown pulse ring */
