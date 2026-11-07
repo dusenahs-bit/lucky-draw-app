@@ -913,29 +913,34 @@ export default function Home() {
                 {activePrize?.noRedraw ? (
                   <div>
                     <p className="text-center text-white/40 text-xs mb-2">총 {pending.length}명 당첨</p>
-                    {/* 14열 × 행높이 균등 분배 — 뷰포트 꽉 채움 (하단 버튼 바 72px 여유) */}
+                    {/* 14열 × 행높이 균등 분배 — 뷰포트 꽉 채움 (하단 버튼 바 여유) */}
                     <div
                       className="grid"
                       style={{
                         gridTemplateColumns: 'repeat(14, 1fr)',
                         gridAutoRows: '1fr',
                         gap: '5px',
-                        height: 'calc(100vh - 260px)',
+                        height: 'calc(100vh - 330px)',
                       }}
                     >
-                      {pending.map((p, i) => (
+                      {pending.map((p, i) => {
+                        const namePart = p.display.includes(' (') ? p.display.split(' (')[0] : p.display
+                        const phonePart = p.display.includes(' (') ? '(' + p.display.split(' (')[1] : ''
+                        return (
                         <div
                           key={i}
-                          className="rounded-md flex items-center justify-center winner-reveal"
+                          className="rounded-md flex flex-col items-center justify-center winner-reveal"
                           style={{
                             background: 'rgba(99,102,241,0.18)',
                             border: '1px solid rgba(139,92,246,0.35)',
                             animationDelay: `${Math.min(i * 0.02, 1.5)}s`,
                           }}
                         >
-                          <span className="text-white font-bold text-center" style={{ fontSize: 'clamp(0.65rem, 0.95vw, 0.9rem)' }}>{p.display}</span>
+                          <span className="text-white font-black text-center leading-tight" style={{ fontSize: 'clamp(0.75rem, 1.1vw, 1rem)' }}>{namePart}</span>
+                          {phonePart && <span className="text-white/70 font-bold text-center leading-tight" style={{ fontSize: 'clamp(0.7rem, 1vw, 0.9rem)' }}>{phonePart}</span>}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 ) : (
