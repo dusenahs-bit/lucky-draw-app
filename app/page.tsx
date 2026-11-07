@@ -920,7 +920,7 @@ export default function Home() {
                         gridTemplateColumns: 'repeat(14, 1fr)',
                         gridAutoRows: '1fr',
                         gap: '5px',
-                        height: 'calc(100vh - 330px)',
+                        height: 'calc(100vh - 410px)',
                       }}
                     >
                       {pending.map((p, i) => {
@@ -936,8 +936,8 @@ export default function Home() {
                             animationDelay: `${Math.min(i * 0.02, 1.5)}s`,
                           }}
                         >
-                          <span className="text-white font-black text-center leading-tight" style={{ fontSize: 'clamp(0.75rem, 1.1vw, 1rem)' }}>{namePart}</span>
-                          {phonePart && <span className="text-white/70 font-bold text-center leading-tight" style={{ fontSize: 'clamp(0.7rem, 1vw, 0.9rem)' }}>{phonePart}</span>}
+                          <span className="text-white font-black text-center leading-tight" style={{ fontSize: 'clamp(0.85rem, 1.3vw, 1.1rem)' }}>{namePart}</span>
+                          {phonePart && <span className="text-white/70 font-bold text-center leading-tight" style={{ fontSize: 'clamp(0.78rem, 1.15vw, 1rem)' }}>{phonePart}</span>}
                         </div>
                         )
                       })}
