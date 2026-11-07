@@ -757,7 +757,7 @@ export default function Home() {
 
         {/* ===== PRIZE DRAW PAGE ===== */}
         {drawPage === 'prize' && activePrize && (
-          <div className="space-y-6 flex flex-col min-h-[80vh]">
+          <div className={`space-y-4 flex flex-col ${activePrize.noRedraw && drawPhase === 'reveal' ? '' : 'min-h-[80vh]'}`}>
             <button
               onClick={() => {
                 setDrawPage('home')
@@ -888,32 +888,39 @@ export default function Home() {
                 {/* ── noRedraw 모드: 콤팩트 그리드 (올리브영 100명 등) ── */}
                 {activePrize?.noRedraw ? (
                   <div>
-                    <p className="text-center text-white/40 text-xs mb-3">총 {pending.length}명 당첨</p>
-                    <div className="grid gap-1.5 mb-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))' }}>
+                    <p className="text-center text-white/40 text-xs mb-2">총 {pending.length}명 당첨</p>
+                    {/* 14열 고정 그리드 — 100명이 화면을 꽉 채움 */}
+                    <div
+                      className="grid mb-3"
+                      style={{
+                        gridTemplateColumns: 'repeat(14, 1fr)',
+                        gap: '5px',
+                      }}
+                    >
                       {pending.map((p, i) => (
                         <div
                           key={i}
-                          className="rounded-lg px-2 py-1.5 text-center winner-reveal"
+                          className="rounded-md text-center winner-reveal"
                           style={{
                             background: 'rgba(99,102,241,0.18)',
                             border: '1px solid rgba(139,92,246,0.35)',
-                            animationDelay: `${Math.min(i * 0.03, 1.5)}s`,
+                            padding: '5px 4px',
+                            animationDelay: `${Math.min(i * 0.02, 1.5)}s`,
                           }}
                         >
-                          <span className="text-white font-bold text-xs">{p.display}</span>
+                          <span className="text-white font-bold" style={{ fontSize: 'clamp(0.6rem, 0.9vw, 0.82rem)' }}>{p.display}</span>
                         </div>
                       ))}
                     </div>
-                    <div className="flex justify-center">
+                    <div className="flex justify-center mt-2">
                       <button
                         onClick={async () => {
-                          // 전체 한꺼번에 확정
                           for (const p of pending) {
                             await confirmWinner(p)
                           }
                           finishBatch()
                         }}
-                        className="text-white font-black py-5 px-16 rounded-full transition-all hover:scale-105 text-lg"
+                        className="text-white font-black py-4 px-14 rounded-full transition-all hover:scale-105 text-base"
                         style={{
                           background: 'rgba(99,102,241,0.4)',
                           border: '2px solid rgba(139,92,246,0.6)',
