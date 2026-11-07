@@ -667,6 +667,30 @@ export default function Home() {
         </button>
       </header>
 
+      {/* noRedraw 100명 확정 버튼 — 화면 하단 고정 */}
+      {drawPage === 'prize' && activePrize?.noRedraw && drawPhase === 'reveal' && pending.length > 0 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 flex justify-center py-4 z-40"
+          style={{ background: 'linear-gradient(to top, rgba(6,14,34,0.98) 70%, transparent)' }}
+        >
+          <button
+            onClick={async () => {
+              for (const p of pending) { await confirmWinner(p) }
+              finishBatch()
+            }}
+            className="text-white font-black py-4 px-16 rounded-full transition-all hover:scale-105"
+            style={{
+              fontSize: 'clamp(1rem, 1.5vw, 1.3rem)',
+              background: 'rgba(99,102,241,0.5)',
+              border: '2px solid rgba(139,92,246,0.7)',
+              boxShadow: '0 0 40px rgba(99,102,241,0.5)',
+            }}
+          >
+            전체 확정 ({pending.length}명) → 다음 추첨으로
+          </button>
+        </div>
+      )}
+
       <main className={drawPage === 'prize' ? 'w-full px-6 md:px-12 py-4 md:py-6' : 'max-w-4xl mx-auto p-4 md:p-6'}>
 
         {/* ===== HOME PAGE ===== */}
@@ -889,46 +913,29 @@ export default function Home() {
                 {activePrize?.noRedraw ? (
                   <div>
                     <p className="text-center text-white/40 text-xs mb-2">총 {pending.length}명 당첨</p>
-                    {/* 14열 고정 그리드 — 100명이 화면을 꽉 채움 */}
+                    {/* 14열 × 행높이 균등 분배 — 뷰포트 꽉 채움 (하단 버튼 바 72px 여유) */}
                     <div
-                      className="grid mb-3"
+                      className="grid"
                       style={{
                         gridTemplateColumns: 'repeat(14, 1fr)',
+                        gridAutoRows: '1fr',
                         gap: '5px',
+                        height: 'calc(100vh - 260px)',
                       }}
                     >
                       {pending.map((p, i) => (
                         <div
                           key={i}
-                          className="rounded-md text-center winner-reveal"
+                          className="rounded-md flex items-center justify-center winner-reveal"
                           style={{
                             background: 'rgba(99,102,241,0.18)',
                             border: '1px solid rgba(139,92,246,0.35)',
-                            padding: '5px 4px',
                             animationDelay: `${Math.min(i * 0.02, 1.5)}s`,
                           }}
                         >
-                          <span className="text-white font-bold" style={{ fontSize: 'clamp(0.6rem, 0.9vw, 0.82rem)' }}>{p.display}</span>
+                          <span className="text-white font-bold text-center" style={{ fontSize: 'clamp(0.65rem, 0.95vw, 0.9rem)' }}>{p.display}</span>
                         </div>
                       ))}
-                    </div>
-                    <div className="flex justify-center mt-2">
-                      <button
-                        onClick={async () => {
-                          for (const p of pending) {
-                            await confirmWinner(p)
-                          }
-                          finishBatch()
-                        }}
-                        className="text-white font-black py-4 px-14 rounded-full transition-all hover:scale-105 text-base"
-                        style={{
-                          background: 'rgba(99,102,241,0.4)',
-                          border: '2px solid rgba(139,92,246,0.6)',
-                          boxShadow: '0 0 40px rgba(99,102,241,0.4)',
-                        }}
-                      >
-                        전체 확정 ({pending.length}명) → 다음 추첨으로
-                      </button>
                     </div>
                   </div>
                 ) : (
